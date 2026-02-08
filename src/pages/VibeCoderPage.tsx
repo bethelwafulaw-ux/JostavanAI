@@ -1,18 +1,25 @@
 import { useState, useRef, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { useChatStore } from '@/stores/chatStore';
+import { useProjectStore, ProjectFile } from '@/stores/projectStore';
 import { useThemeStore } from '@/stores/themeStore';
 import { ModelSelector } from '@/components/features/ModelSelector';
 import { AgentBadge, AgentPipeline } from '@/components/features/AgentBadge';
 import { ThemeToggle } from '@/components/features/ThemeToggle';
+import { GitHubConnect } from '@/components/features/GitHubConnect';
+import { BackendConnect } from '@/components/features/BackendConnect';
+import { SQLExport } from '@/components/features/SQLExport';
 import { AGENT_CONFIGS, PHASE_DESCRIPTIONS } from '@/constants/config';
 import { cn, formatRelativeTime, getLanguageFromPath } from '@/lib/utils';
+import { generateFullWebsite, WebsiteConfig } from '@/lib/website-generator';
 import {
   Send,
   Plus,
   MessageSquare,
   Trash2,
   File,
+  Folder,
+  FolderOpen,
   FolderTree,
   Copy,
   Check,
@@ -22,11 +29,14 @@ import {
   Eye,
   PanelRightClose,
   PanelRightOpen,
+  PanelLeftClose,
+  PanelLeftOpen,
   LayoutDashboard,
   Key,
   BookOpen,
   BarChart3,
   ChevronDown,
+  ChevronRight,
   Monitor,
   Smartphone,
   Tablet,
@@ -40,6 +50,17 @@ import {
   Zap,
   CheckCircle2,
   Activity,
+  MoreVertical,
+  Download,
+  RefreshCw,
+  Settings,
+  FileCode,
+  FilePlus,
+  FolderPlus,
+  X,
+  Play,
+  Terminal,
+  Wand2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
@@ -50,8 +71,15 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from '@/components/ui/tabs';
 
 const navItems = [
   { path: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
@@ -80,6 +108,102 @@ const phaseToNumber: Record<string, number> = {
   complete: 8,
 };
 
+// File tree component
+function FileTreeItem({ 
+  item, 
+  depth = 0, 
+  expandedFolders, 
+  onToggle, 
+  selectedPath, 
+  onSelect 
+}: {
+  item: ProjectFile;
+  depth?: number;
+  expandedFolders: Set<string>;
+  onToggle: (path: string) => void;
+  selectedPath: string | null;
+  onSelect: (path: string) => void;
+}) {
+  const isExpanded = expandedFolders.has(item.path);
+  const isSelected = selectedPath === item.path;
+  
+  if (item.type === 'folder') {
+    return (
+      <div>
+        <button
+          onClick={() => onToggle(item.path)}
+          className={cn(
+            'w-full flex items-center gap-1.5 px-2 py-1 text-left text-sm hover:bg-muted/50 rounded transition-colors',
+            depth > 0 && 'ml-3'
+          )}
+        >
+          <ChevronRight className={cn('size-3 transition-transform', isExpanded && 'rotate-90')} />
+          {isExpanded ? (
+            <FolderOpen className="size-4 text-amber-500" />
+          ) : (
+            <Folder className="size-4 text-amber-500" />
+          )}
+          <span className="truncate">{item.name}</span>
+        </button>
+        {isExpanded && item.children && (
+          <div>
+            {item.children.map((child) => (
+              <FileTreeItem
+                key={child.path}
+                item={child}
+                depth={depth + 1}
+                expandedFolders={expandedFolders}
+                onToggle={onToggle}
+                selectedPath={selectedPath}
+                onSelect={onSelect}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
+  
+  // Get file icon based on extension
+  const getFileIcon = (name: string) => {
+    const ext = name.split('.').pop()?.toLowerCase();
+    const iconClass = 'size-4';
+    switch (ext) {
+      case 'tsx':
+      case 'jsx':
+        return <FileCode className={cn(iconClass, 'text-blue-400')} />;
+      case 'ts':
+      case 'js':
+        return <FileCode className={cn(iconClass, 'text-yellow-400')} />;
+      case 'css':
+        return <FileCode className={cn(iconClass, 'text-pink-400')} />;
+      case 'json':
+        return <FileCode className={cn(iconClass, 'text-green-400')} />;
+      case 'sql':
+        return <Database className={cn(iconClass, 'text-purple-400')} />;
+      case 'html':
+        return <FileCode className={cn(iconClass, 'text-orange-400')} />;
+      default:
+        return <File className={cn(iconClass, 'text-muted-foreground')} />;
+    }
+  };
+  
+  return (
+    <button
+      onClick={() => onSelect(item.path)}
+      className={cn(
+        'w-full flex items-center gap-1.5 px-2 py-1 text-left text-sm rounded transition-colors',
+        depth > 0 && 'ml-6',
+        isSelected ? 'bg-primary/10 text-primary' : 'hover:bg-muted/50'
+      )}
+    >
+      {getFileIcon(item.name)}
+      <span className="truncate font-mono text-xs">{item.name}</span>
+      {item.isModified && <span className="size-2 rounded-full bg-amber-500 ml-auto" />}
+    </button>
+  );
+}
+
 export default function VibeCoderPage() {
   const {
     sessions,
@@ -94,34 +218,53 @@ export default function VibeCoderPage() {
     setModel,
   } = useChatStore();
   
+  const {
+    projects,
+    currentProjectId,
+    selectedFilePath,
+    expandedFolders,
+    createProject,
+    selectProject,
+    addFile,
+    updateFile,
+    selectFile,
+    toggleFolder,
+    getFileTree,
+    getCurrentProject,
+  } = useProjectStore();
+  
   const { theme } = useThemeStore();
   const { toast } = useToast();
   const [input, setInput] = useState('');
   const [chatSidebarOpen, setChatSidebarOpen] = useState(true);
   const [filesPanelOpen, setFilesPanelOpen] = useState(true);
-  const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [navbarVisible, setNavbarVisible] = useState(false);
   const [viewport, setViewport] = useState<ViewportSize>('desktop');
-  const [showCode, setShowCode] = useState(false);
+  const [showCode, setShowCode] = useState(true);
+  const [activeTab, setActiveTab] = useState<'code' | 'preview' | 'terminal'>('code');
+  const [currentSQL, setCurrentSQL] = useState('');
+  const [isBuilding, setIsBuilding] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const navbarTimeoutRef = useRef<NodeJS.Timeout>();
 
   const currentSession = sessions.find((s) => s.id === currentSessionId);
-  const currentFile = currentSession?.files.find((f) => f.path === selectedFile);
+  const currentProject = getCurrentProject();
+  const fileTree = getFileTree();
+  const currentFile = currentProject?.files.find((f) => f.path === selectedFilePath);
 
   // Auto-scroll messages
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [currentSession?.messages]);
 
-  // Select first generated file automatically
+  // Initialize project if none exists
   useEffect(() => {
-    if (currentSession?.files.length && !selectedFile) {
-      setSelectedFile(currentSession.files[0].path);
+    if (!currentProjectId && projects.length === 0) {
+      createProject('My Website', 'AI-generated website project');
     }
-  }, [currentSession?.files, selectedFile]);
+  }, [currentProjectId, projects.length, createProject]);
 
   const handleNavbarEnter = () => {
     if (navbarTimeoutRef.current) {
@@ -136,9 +279,77 @@ export default function VibeCoderPage() {
     }, 300);
   };
 
+  const handleBuildWebsite = async (prompt: string) => {
+    setIsBuilding(true);
+    
+    // Analyze prompt to determine website type
+    const lowerPrompt = prompt.toLowerCase();
+    const config: WebsiteConfig = {
+      name: 'My Website',
+      description: prompt.slice(0, 100),
+      type: 'landing',
+      features: [],
+      hasAuth: false,
+      hasDatabase: false,
+    };
+    
+    // Detect website type
+    if (lowerPrompt.includes('dashboard') || lowerPrompt.includes('admin')) {
+      config.type = 'dashboard';
+      config.features.push('dashboard');
+    }
+    if (lowerPrompt.includes('ecommerce') || lowerPrompt.includes('shop') || lowerPrompt.includes('store')) {
+      config.type = 'ecommerce';
+      config.features.push('products', 'cart');
+    }
+    if (lowerPrompt.includes('blog')) {
+      config.type = 'blog';
+      config.features.push('blog');
+    }
+    if (lowerPrompt.includes('saas') || lowerPrompt.includes('subscription')) {
+      config.type = 'saas';
+      config.features.push('dashboard');
+    }
+    if (lowerPrompt.includes('portfolio')) {
+      config.type = 'portfolio';
+    }
+    
+    // Detect features
+    if (lowerPrompt.includes('auth') || lowerPrompt.includes('login') || lowerPrompt.includes('signup') || lowerPrompt.includes('user')) {
+      config.hasAuth = true;
+      config.hasDatabase = true;
+    }
+    if (lowerPrompt.includes('database') || lowerPrompt.includes('sql') || lowerPrompt.includes('data')) {
+      config.hasDatabase = true;
+    }
+    
+    // Generate website
+    const { files, sql } = generateFullWebsite(config);
+    
+    // Add files to project with streaming effect
+    for (const file of files) {
+      await new Promise(resolve => setTimeout(resolve, 100));
+      addFile(file.path, file.content || '', getLanguageFromPath(file.path));
+    }
+    
+    // Set SQL if generated
+    if (sql) {
+      setCurrentSQL(sql);
+    }
+    
+    // Select first file
+    if (files.length > 0) {
+      selectFile(files[0].path);
+    }
+    
+    setIsBuilding(false);
+    
+    return { files, sql, config };
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!input.trim() || isGenerating) return;
+    if (!input.trim() || isGenerating || isBuilding) return;
 
     if (!currentSessionId) {
       createSession();
@@ -151,18 +362,68 @@ export default function VibeCoderPage() {
       textareaRef.current.style.height = 'auto';
     }
 
-    // Check if it's a quick question or a build request
-    const isQuickQuestion = prompt.length < 50 && 
-      (prompt.includes('?') || 
-       prompt.toLowerCase().startsWith('what') ||
-       prompt.toLowerCase().startsWith('how') ||
-       prompt.toLowerCase().startsWith('why') ||
-       prompt.toLowerCase().startsWith('explain'));
+    // Check if it's a website build request
+    const isBuildRequest = 
+      prompt.toLowerCase().includes('build') ||
+      prompt.toLowerCase().includes('create') ||
+      prompt.toLowerCase().includes('make') ||
+      prompt.toLowerCase().includes('generate') ||
+      prompt.length > 50;
     
-    if (isQuickQuestion) {
-      await processFastChat(prompt);
-    } else {
+    if (isBuildRequest) {
+      // Add user message
+      useChatStore.getState().addMessage({ role: 'user', content: prompt });
+      
+      // Add thinking message
+      useChatStore.getState().addMessage({
+        role: 'assistant',
+        content: `🚀 **Starting Full Website Build**
+
+Analyzing your request and preparing the 7-agent pipeline...
+
+• **Blueprinter** → Planning architecture
+• **Data Architect** → Designing schemas
+• **UI Craftsman** → Building components
+• **Guardian** → Security audit
+• **Scout** → Checking latest versions
+• **Auditor** → Final review
+
+Building your website now...`,
+        agent: 'orchestrator',
+      });
+      
+      // Build the website
+      const result = await handleBuildWebsite(prompt);
+      
+      // Add completion message
+      useChatStore.getState().addMessage({
+        role: 'assistant',
+        content: `✅ **Website Build Complete!**
+
+**Generated:**
+• ${result.files.length} files created
+• ${result.config.type.charAt(0).toUpperCase() + result.config.type.slice(1)} website
+${result.config.hasAuth ? '• Authentication system included' : ''}
+${result.sql ? `• SQL schema with ${result.sql.match(/CREATE TABLE/gi)?.length || 0} tables` : ''}
+
+**Features:**
+${result.config.features.map(f => `• ${f}`).join('\n') || '• Landing page'}
+
+The code is ready in the editor. You can:
+1. View and edit files in the file tree
+2. Export SQL to run on your backend
+3. Push to GitHub
+4. Connect your database
+
+What would you like to modify?`,
+        agent: 'orchestrator',
+      });
+      
+      // Process through orchestrator for full pipeline
       await processTask(prompt);
+    } else {
+      // Quick chat
+      await processFastChat(prompt);
     }
   };
 
@@ -175,7 +436,6 @@ export default function VibeCoderPage() {
 
   const handleNewChat = () => {
     createSession();
-    setSelectedFile(null);
   };
 
   const handleCopyCode = () => {
@@ -187,6 +447,12 @@ export default function VibeCoderPage() {
         title: 'Copied!',
         description: 'Code copied to clipboard.',
       });
+    }
+  };
+
+  const handleEditorChange = (value: string | undefined) => {
+    if (selectedFilePath && value !== undefined) {
+      updateFile(selectedFilePath, value);
     }
   };
 
@@ -244,30 +510,39 @@ export default function VibeCoderPage() {
         <div className="flex-1" />
 
         {/* Pipeline indicator */}
-        {isGenerating && (
+        {(isGenerating || isBuilding) && (
           <div className="hidden lg:flex items-center gap-2 px-3 py-1.5 rounded-full bg-muted/50 border border-border">
             <Activity className="size-3 text-primary animate-pulse" />
             <span className="text-xs text-muted-foreground">
-              {PHASE_DESCRIPTIONS[currentPhase] || 'Processing...'}
+              {isBuilding ? 'Building website...' : PHASE_DESCRIPTIONS[currentPhase] || 'Processing...'}
             </span>
           </div>
         )}
+
+        {/* GitHub Connect */}
+        <GitHubConnect />
+
+        {/* Backend Connect */}
+        <BackendConnect />
+
+        {/* SQL Export */}
+        {currentSQL && <SQLExport sql={currentSQL} />}
 
         {/* Model selector */}
         <ModelSelector
           value={currentSession?.model || 'balanced'}
           onChange={setModel}
-          disabled={isGenerating}
+          disabled={isGenerating || isBuilding}
         />
 
         {/* Status */}
         <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full bg-muted/50 border border-border">
           <div className={cn(
             'size-2 rounded-full',
-            isGenerating ? 'bg-amber-500 animate-pulse' : 'bg-green-500'
+            (isGenerating || isBuilding) ? 'bg-amber-500 animate-pulse' : 'bg-green-500'
           )} />
           <span className="text-xs text-muted-foreground font-mono">
-            {isGenerating ? 'Working' : 'Ready'}
+            {isBuilding ? 'Building' : isGenerating ? 'Working' : 'Ready'}
           </span>
         </div>
 
@@ -280,18 +555,18 @@ export default function VibeCoderPage() {
         <div
           className={cn(
             'border-r border-border bg-card/30 flex flex-col transition-all duration-300',
-            chatSidebarOpen ? 'w-[420px]' : 'w-14'
+            chatSidebarOpen ? 'w-[380px]' : 'w-0'
           )}
         >
-          {/* Chat header */}
-          <div className="h-12 border-b border-border flex items-center justify-between px-3 bg-card/50">
-            {chatSidebarOpen ? (
-              <>
+          {chatSidebarOpen && (
+            <>
+              {/* Chat header */}
+              <div className="h-12 border-b border-border flex items-center justify-between px-3 bg-card/50">
                 <div className="flex items-center gap-2">
                   <div className="size-6 rounded-lg bg-gradient-to-br from-cyan-500 to-purple-500 flex items-center justify-center">
-                    <Brain className="size-3 text-white" />
+                    <Wand2 className="size-3 text-white" />
                   </div>
-                  <span className="font-semibold text-sm">Multi-Agent Pipeline</span>
+                  <span className="font-semibold text-sm">AI Builder</span>
                 </div>
                 <div className="flex items-center gap-1">
                   <Button
@@ -308,130 +583,49 @@ export default function VibeCoderPage() {
                     className="size-7"
                     onClick={() => setChatSidebarOpen(false)}
                   >
-                    <PanelRightClose className="size-4" />
+                    <PanelLeftClose className="size-4" />
                   </Button>
                 </div>
-              </>
-            ) : (
-              <Button
-                size="icon"
-                variant="ghost"
-                className="size-8 mx-auto"
-                onClick={() => setChatSidebarOpen(true)}
-              >
-                <PanelRightOpen className="size-4" />
-              </Button>
-            )}
-          </div>
+              </div>
 
-          {chatSidebarOpen && (
-            <>
               {/* Agent Pipeline Indicator */}
-              {isGenerating && (
+              {(isGenerating || isBuilding) && (
                 <div className="px-3 py-2 border-b border-border bg-muted/20">
                   <AgentPipeline 
-                    currentPhase={phaseToNumber[currentPhase] || 0} 
+                    currentPhase={isBuilding ? 3 : phaseToNumber[currentPhase] || 0} 
                     className="text-[9px]"
                   />
                 </div>
               )}
-
-              {/* Sessions list - collapsible */}
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <button className="w-full px-3 py-2 flex items-center justify-between text-sm hover:bg-muted/50 border-b border-border">
-                    <span className="truncate font-medium">
-                      {currentSession?.title || 'Select chat'}
-                    </span>
-                    <ChevronDown className="size-4 text-muted-foreground" />
-                  </button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="start" className="w-80">
-                  {sessions.map((session) => (
-                    <DropdownMenuItem
-                      key={session.id}
-                      className="flex items-center justify-between"
-                      onClick={() => {
-                        selectSession(session.id);
-                        setSelectedFile(session.files[0]?.path || null);
-                      }}
-                    >
-                      <div className="flex items-center gap-2 min-w-0">
-                        <MessageSquare className="size-4 text-muted-foreground shrink-0" />
-                        <span className="truncate">{session.title}</span>
-                      </div>
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        className="size-6 shrink-0"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          deleteSession(session.id);
-                        }}
-                      >
-                        <Trash2 className="size-3" />
-                      </Button>
-                    </DropdownMenuItem>
-                  ))}
-                  {sessions.length === 0 && (
-                    <div className="px-2 py-4 text-sm text-muted-foreground text-center">
-                      No chat sessions yet
-                    </div>
-                  )}
-                </DropdownMenuContent>
-              </DropdownMenu>
 
               {/* Messages */}
               <ScrollArea className="flex-1 p-3">
                 {!currentSession || currentSession.messages.length === 0 ? (
                   <div className="h-full flex flex-col items-center justify-center text-center px-4 py-8">
                     <div className="size-16 rounded-2xl bg-gradient-to-br from-cyan-500/20 to-purple-500/20 flex items-center justify-center mb-4 relative">
-                      <Brain className="size-8 text-primary" />
+                      <Wand2 className="size-8 text-primary" />
                       <div className="absolute -right-1 -bottom-1 size-6 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center">
                         <Zap className="size-3 text-white" />
                       </div>
                     </div>
-                    <h3 className="font-semibold text-lg mb-1">7-Agent Pipeline</h3>
+                    <h3 className="font-semibold text-lg mb-1">AI Website Builder</h3>
                     <p className="text-sm text-muted-foreground mb-6 max-w-xs">
-                      Each AI specialist handles their domain to build production-ready code
+                      Describe your website and I'll build the complete codebase with SQL schemas
                     </p>
-                    
-                    {/* Agent showcase */}
-                    <div className="w-full space-y-2 mb-6">
-                      {[
-                        { icon: Layers, name: 'Blueprinter', model: 'Gemini 1.5 Pro', color: 'cyan' },
-                        { icon: Database, name: 'Data Architect', model: 'Claude 3.5 Sonnet', color: 'purple' },
-                        { icon: Palette, name: 'UI Craftsman', model: 'Claude 3.5 Sonnet', color: 'pink' },
-                        { icon: Shield, name: 'Guardian', model: 'GPT-4o', color: 'amber' },
-                        { icon: Globe, name: 'Scout', model: 'Perplexity', color: 'green' },
-                        { icon: CheckCircle2, name: 'Auditor', model: 'OpenAI o1', color: 'emerald' },
-                      ].map((agent, i) => (
-                        <div 
-                          key={agent.name}
-                          className={cn(
-                            'flex items-center gap-2 p-2 rounded-lg bg-muted/30 text-xs',
-                            'opacity-0 animate-fade-in'
-                          )}
-                          style={{ animationDelay: `${i * 100}ms`, animationFillMode: 'forwards' }}
-                        >
-                          <agent.icon className={cn('size-4', `text-${agent.color}-400`)} />
-                          <span className="font-medium">{agent.name}</span>
-                          <span className="text-muted-foreground ml-auto">{agent.model}</span>
-                        </div>
-                      ))}
-                    </div>
                     
                     <div className="space-y-2 w-full">
                       {[
-                        'Build a user authentication system',
-                        'Create an admin dashboard',
-                        'Design an e-commerce product page',
+                        'Build a modern SaaS landing page with auth',
+                        'Create an e-commerce store with products',
+                        'Make a dashboard with analytics charts',
+                        'Build a blog with user authentication',
                       ].map((suggestion) => (
                         <button
                           key={suggestion}
                           onClick={() => setInput(suggestion)}
                           className="w-full p-2.5 text-left text-xs rounded-lg border border-border hover:border-primary/50 hover:bg-muted/50 transition-colors"
                         >
+                          <Sparkles className="size-3 inline mr-2 text-primary" />
                           {suggestion}
                         </button>
                       ))}
@@ -468,7 +662,7 @@ export default function VibeCoderPage() {
                           {message.agent && (
                             <AgentBadge 
                               agent={message.agent} 
-                              showModel={true} 
+                              showModel={false} 
                               animated={isGenerating && message === currentSession.messages[currentSession.messages.length - 1]}
                             />
                           )}
@@ -490,10 +684,12 @@ export default function VibeCoderPage() {
                         </div>
                       </div>
                     ))}
-                    {isGenerating && (
+                    {(isGenerating || isBuilding) && (
                       <div className="flex items-center gap-2 text-muted-foreground p-2 rounded-lg bg-muted/30">
                         <Loader2 className="size-3 animate-spin text-primary" />
-                        <span className="text-xs">{PHASE_DESCRIPTIONS[currentPhase] || 'Processing...'}</span>
+                        <span className="text-xs">
+                          {isBuilding ? 'Building your website...' : PHASE_DESCRIPTIONS[currentPhase] || 'Processing...'}
+                        </span>
                       </div>
                     )}
                     <div ref={messagesEndRef} />
@@ -514,17 +710,17 @@ export default function VibeCoderPage() {
                         e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px';
                       }}
                       onKeyDown={handleKeyDown}
-                      placeholder="Describe your app or ask a question..."
+                      placeholder="Describe the website you want to build..."
                       className="min-h-[44px] max-h-[120px] pr-12 resize-none text-sm bg-muted/50 border-border focus:border-primary"
-                      disabled={isGenerating}
+                      disabled={isGenerating || isBuilding}
                     />
                     <Button
                       type="submit"
                       size="icon"
-                      disabled={!input.trim() || isGenerating}
+                      disabled={!input.trim() || isGenerating || isBuilding}
                       className="absolute right-2 bottom-2 size-8 bg-gradient-to-r from-cyan-500 to-purple-500 hover:from-cyan-600 hover:to-purple-600"
                     >
-                      {isGenerating ? (
+                      {(isGenerating || isBuilding) ? (
                         <Loader2 className="size-4 animate-spin" />
                       ) : (
                         <Send className="size-4" />
@@ -532,7 +728,7 @@ export default function VibeCoderPage() {
                     </Button>
                   </div>
                   <p className="text-[10px] text-muted-foreground mt-2 text-center">
-                    Build requests → Full pipeline • Quick questions → Fast Chat (Gemini Flash)
+                    Full codebase control • SQL generation • GitHub push
                   </p>
                 </form>
               </div>
@@ -540,155 +736,183 @@ export default function VibeCoderPage() {
           )}
         </div>
 
-        {/* Center: Preview Area */}
+        {/* Toggle chat button when closed */}
+        {!chatSidebarOpen && (
+          <Button
+            size="icon"
+            variant="ghost"
+            className="fixed left-4 top-1/2 -translate-y-1/2 size-8 z-10"
+            onClick={() => setChatSidebarOpen(true)}
+          >
+            <PanelLeftOpen className="size-4" />
+          </Button>
+        )}
+
+        {/* Center: Code Editor / Preview */}
         <div className="flex-1 flex flex-col bg-muted/20 min-w-0">
-          {/* Preview header */}
+          {/* Editor header */}
           <div className="h-12 border-b border-border flex items-center justify-between px-4 bg-card/30">
             <div className="flex items-center gap-2">
-              <Eye className="size-4 text-muted-foreground" />
-              <span className="font-medium text-sm">Preview</span>
-              {currentSession?.finalCheck?.approved && (
-                <span className="flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full bg-green-500/10 text-green-400 border border-green-500/30">
-                  <CheckCircle2 className="size-3" />
-                  Production Ready
-                </span>
+              {currentFile ? (
+                <>
+                  <FileCode className="size-4 text-muted-foreground" />
+                  <span className="font-mono text-sm">{currentFile.path}</span>
+                  {currentFile.isModified && (
+                    <span className="size-2 rounded-full bg-amber-500" />
+                  )}
+                </>
+              ) : (
+                <>
+                  <Code2 className="size-4 text-muted-foreground" />
+                  <span className="font-medium text-sm">Editor</span>
+                </>
               )}
             </div>
 
             <div className="flex items-center gap-2">
-              {/* Viewport selector */}
-              <div className="flex items-center gap-1 p-1 rounded-lg bg-muted/50">
-                {(Object.keys(viewportSizes) as ViewportSize[]).map((size) => {
-                  const Icon = viewportSizes[size].icon;
-                  return (
-                    <Button
-                      key={size}
-                      size="icon"
-                      variant={viewport === size ? 'secondary' : 'ghost'}
-                      className="size-7"
-                      onClick={() => setViewport(size)}
-                    >
-                      <Icon className="size-4" />
-                    </Button>
-                  );
-                })}
-              </div>
+              {/* Tabs */}
+              <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as typeof activeTab)}>
+                <TabsList className="h-8">
+                  <TabsTrigger value="code" className="h-7 px-3 text-xs gap-1.5">
+                    <Code2 className="size-3" />
+                    Code
+                  </TabsTrigger>
+                  <TabsTrigger value="preview" className="h-7 px-3 text-xs gap-1.5">
+                    <Eye className="size-3" />
+                    Preview
+                  </TabsTrigger>
+                  <TabsTrigger value="terminal" className="h-7 px-3 text-xs gap-1.5">
+                    <Terminal className="size-3" />
+                    Terminal
+                  </TabsTrigger>
+                </TabsList>
+              </Tabs>
 
-              {/* Code/Preview toggle */}
-              <div className="flex items-center gap-1 p-1 rounded-lg bg-muted/50">
-                <Button
-                  size="sm"
-                  variant={!showCode ? 'secondary' : 'ghost'}
-                  className="h-7 px-3 text-xs"
-                  onClick={() => setShowCode(false)}
-                >
-                  <Eye className="size-3 mr-1.5" />
-                  Preview
-                </Button>
-                <Button
-                  size="sm"
-                  variant={showCode ? 'secondary' : 'ghost'}
-                  className="h-7 px-3 text-xs"
-                  onClick={() => setShowCode(true)}
-                >
-                  <Code2 className="size-3 mr-1.5" />
-                  Code
-                </Button>
-              </div>
+              {/* Viewport selector for preview */}
+              {activeTab === 'preview' && (
+                <div className="flex items-center gap-1 p-1 rounded-lg bg-muted/50 ml-2">
+                  {(Object.keys(viewportSizes) as ViewportSize[]).map((size) => {
+                    const Icon = viewportSizes[size].icon;
+                    return (
+                      <Button
+                        key={size}
+                        size="icon"
+                        variant={viewport === size ? 'secondary' : 'ghost'}
+                        className="size-7"
+                        onClick={() => setViewport(size)}
+                      >
+                        <Icon className="size-4" />
+                      </Button>
+                    );
+                  })}
+                </div>
+              )}
 
+              {/* Actions */}
+              <Button size="icon" variant="ghost" className="size-7" onClick={handleCopyCode}>
+                {copied ? <Check className="size-4" /> : <Copy className="size-4" />}
+              </Button>
               <Button size="icon" variant="ghost" className="size-7">
-                <ExternalLink className="size-4" />
+                <Download className="size-4" />
               </Button>
             </div>
           </div>
 
-          {/* Preview content */}
-          <div className="flex-1 flex items-center justify-center p-6 overflow-auto">
-            {showCode && currentFile ? (
-              <div className="w-full h-full rounded-xl overflow-hidden border border-border bg-[var(--editor-bg)]">
-                <Editor
-                  height="100%"
-                  language={getLanguageFromPath(currentFile.path)}
-                  value={currentFile.content}
-                  theme={theme === 'dark' ? 'vs-dark' : 'vs'}
-                  options={{
-                    readOnly: true,
-                    minimap: { enabled: false },
-                    fontSize: 13,
-                    fontFamily: 'JetBrains Mono, monospace',
-                    lineNumbers: 'on',
-                    scrollBeyondLastLine: false,
-                    wordWrap: 'on',
-                    padding: { top: 16 },
-                  }}
-                />
-              </div>
-            ) : (
-              <div
-                className="preview-frame h-full overflow-hidden border border-border transition-all duration-300"
-                style={{
-                  width: viewportSizes[viewport].width,
-                  maxWidth: '100%',
-                }}
-              >
-                {currentSession?.files.length ? (
-                  <div className="h-full flex flex-col items-center justify-center bg-gradient-to-br from-cyan-500/10 to-purple-500/10 p-8">
-                    <div className="text-center max-w-md">
-                      <div className="size-20 rounded-2xl bg-gradient-to-br from-cyan-500 to-purple-500 flex items-center justify-center mx-auto mb-6 shadow-lg shadow-cyan-500/20">
-                        <CheckCircle2 className="size-10 text-white" />
-                      </div>
-                      <h3 className="font-semibold text-xl mb-2">
-                        {currentSession.files.length} Files Generated
-                      </h3>
-                      <p className="text-muted-foreground text-sm mb-6">
-                        Built by {Object.keys(currentSession.manifest?.files || {}).length > 0 ? '7 specialized AI agents' : 'AI agents'} working together
-                      </p>
-                      
-                      {/* Stats */}
-                      {currentSession.finalCheck && (
-                        <div className="grid grid-cols-3 gap-3 mb-6">
-                          <div className="p-3 rounded-lg bg-muted/30">
-                            <div className="text-2xl font-bold text-primary">
-                              {currentSession.finalCheck.overallScore}
-                            </div>
-                            <div className="text-[10px] text-muted-foreground">Quality Score</div>
-                          </div>
-                          <div className="p-3 rounded-lg bg-muted/30">
-                            <div className="text-2xl font-bold text-green-400">
-                              {currentSession.dataSchema?.tables.length || 0}
-                            </div>
-                            <div className="text-[10px] text-muted-foreground">DB Tables</div>
-                          </div>
-                          <div className="p-3 rounded-lg bg-muted/30">
-                            <div className="text-2xl font-bold text-amber-400">
-                              {currentSession.securityAudit?.passed ? '✓' : '!'}
-                            </div>
-                            <div className="text-[10px] text-muted-foreground">Security</div>
-                          </div>
-                        </div>
-                      )}
-                      
-                      <Button
-                        size="lg"
-                        onClick={() => setShowCode(true)}
-                        className="bg-gradient-to-r from-cyan-500 to-purple-500 hover:from-cyan-600 hover:to-purple-600"
-                      >
-                        <Code2 className="size-4 mr-2" />
-                        View Generated Code
-                      </Button>
-                    </div>
-                  </div>
+          {/* Content area */}
+          <div className="flex-1 overflow-hidden">
+            {activeTab === 'code' && (
+              <div className="h-full">
+                {currentFile ? (
+                  <Editor
+                    height="100%"
+                    language={currentFile.language}
+                    value={currentFile.content}
+                    onChange={handleEditorChange}
+                    theme={theme === 'dark' ? 'vs-dark' : 'vs'}
+                    options={{
+                      minimap: { enabled: true },
+                      fontSize: 13,
+                      fontFamily: 'JetBrains Mono, monospace',
+                      lineNumbers: 'on',
+                      scrollBeyondLastLine: false,
+                      wordWrap: 'on',
+                      padding: { top: 16 },
+                      tabSize: 2,
+                      formatOnPaste: true,
+                      formatOnType: true,
+                    }}
+                  />
                 ) : (
-                  <div className="h-full flex flex-col items-center justify-center p-8">
-                    <div className="size-20 rounded-2xl bg-muted/50 flex items-center justify-center mb-6">
-                      <Eye className="size-10 text-muted-foreground" />
+                  <div className="h-full flex items-center justify-center">
+                    <div className="text-center">
+                      <FileCode className="size-16 text-muted-foreground/30 mx-auto mb-4" />
+                      <h3 className="font-medium text-lg mb-2">No file selected</h3>
+                      <p className="text-sm text-muted-foreground">
+                        Select a file from the tree or ask AI to generate code
+                      </p>
                     </div>
-                    <h3 className="font-semibold text-xl mb-2">Ready to Build</h3>
-                    <p className="text-muted-foreground text-sm text-center max-w-xs">
-                      Describe what you want to create and our 7-agent pipeline will handle the rest
-                    </p>
                   </div>
                 )}
+              </div>
+            )}
+
+            {activeTab === 'preview' && (
+              <div className="h-full flex items-center justify-center p-6">
+                <div
+                  className="h-full border rounded-xl overflow-hidden bg-white transition-all duration-300"
+                  style={{
+                    width: viewportSizes[viewport].width,
+                    maxWidth: '100%',
+                  }}
+                >
+                  {currentProject?.files.length ? (
+                    <div className="h-full flex flex-col items-center justify-center bg-gradient-to-br from-cyan-500/10 to-purple-500/10 p-8">
+                      <div className="text-center max-w-md">
+                        <div className="size-20 rounded-2xl bg-gradient-to-br from-cyan-500 to-purple-500 flex items-center justify-center mx-auto mb-6 shadow-lg shadow-cyan-500/20">
+                          <CheckCircle2 className="size-10 text-white" />
+                        </div>
+                        <h3 className="font-semibold text-xl mb-2 text-gray-900">
+                          {currentProject.files.length} Files Generated
+                        </h3>
+                        <p className="text-gray-600 text-sm mb-6">
+                          Your website code is ready. Download or push to GitHub.
+                        </p>
+                        <div className="flex gap-2 justify-center">
+                          <Button size="sm" variant="outline">
+                            <Download className="size-4 mr-2" />
+                            Download
+                          </Button>
+                          <Button size="sm">
+                            <Play className="size-4 mr-2" />
+                            Run Preview
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="h-full flex flex-col items-center justify-center p-8 text-gray-500">
+                      <Eye className="size-16 opacity-30 mb-4" />
+                      <h3 className="font-medium text-lg mb-2">No preview available</h3>
+                      <p className="text-sm">Generate code to see the preview</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {activeTab === 'terminal' && (
+              <div className="h-full bg-gray-900 p-4 font-mono text-sm text-green-400">
+                <div className="mb-2">$ npm run dev</div>
+                <div className="text-gray-500">Ready to run your generated website...</div>
+                <div className="mt-4 text-gray-600">
+                  <p>• Connect your backend to run SQL migrations</p>
+                  <p>• Push to GitHub and deploy</p>
+                  <p>• Or download the code and run locally</p>
+                </div>
+                <div className="mt-4 flex items-center gap-2">
+                  <span className="text-gray-500">$</span>
+                  <span className="animate-pulse">_</span>
+                </div>
               </div>
             )}
           </div>
@@ -698,7 +922,7 @@ export default function VibeCoderPage() {
         <div
           className={cn(
             'border-l border-border bg-card/30 flex flex-col transition-all duration-300',
-            filesPanelOpen ? 'w-72' : 'w-0'
+            filesPanelOpen ? 'w-64' : 'w-0'
           )}
         >
           {filesPanelOpen && (
@@ -707,96 +931,88 @@ export default function VibeCoderPage() {
               <div className="h-12 border-b border-border flex items-center justify-between px-3 bg-card/50">
                 <div className="flex items-center gap-2">
                   <FolderTree className="size-4 text-muted-foreground" />
-                  <span className="font-semibold text-sm">Generated Files</span>
-                  {currentSession?.files.length && (
+                  <span className="font-semibold text-sm">Files</span>
+                  {currentProject?.files.length && (
                     <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-primary/10 text-primary">
-                      {currentSession.files.length}
+                      {currentProject.files.length}
                     </span>
                   )}
                 </div>
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  className="size-7"
-                  onClick={() => setFilesPanelOpen(false)}
-                >
-                  <PanelRightClose className="size-4" />
-                </Button>
+                <div className="flex items-center gap-1">
+                  <Button size="icon" variant="ghost" className="size-7">
+                    <FilePlus className="size-4" />
+                  </Button>
+                  <Button size="icon" variant="ghost" className="size-7">
+                    <FolderPlus className="size-4" />
+                  </Button>
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    className="size-7"
+                    onClick={() => setFilesPanelOpen(false)}
+                  >
+                    <PanelRightClose className="size-4" />
+                  </Button>
+                </div>
               </div>
 
               {/* File tree */}
               <ScrollArea className="flex-1 p-2">
-                {currentSession?.files.length ? (
-                  <div className="space-y-1">
-                    {currentSession.files.map((file) => (
-                      <button
-                        key={file.path}
-                        onClick={() => {
-                          setSelectedFile(file.path);
-                          setShowCode(true);
-                        }}
-                        className={cn(
-                          'w-full flex items-center gap-2 px-2 py-2 rounded-lg text-left transition-colors',
-                          selectedFile === file.path
-                            ? 'bg-muted text-foreground'
-                            : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
-                        )}
-                      >
-                        <File className="size-4 shrink-0" />
-                        <div className="flex-1 min-w-0">
-                          <span className="font-mono text-xs truncate block">
-                            {file.path.split('/').pop()}
-                          </span>
-                          <span className="text-[10px] text-muted-foreground truncate block">
-                            {file.path.split('/').slice(0, -1).join('/')}
-                          </span>
-                        </div>
-                        {file.status === 'generating' && (
-                          <Loader2 className="size-3 animate-spin text-primary" />
-                        )}
-                        {file.status === 'complete' && (
-                          <Check className="size-3 text-green-500" />
-                        )}
-                        {file.status === 'approved' && (
-                          <CheckCircle2 className="size-3 text-emerald-500" />
-                        )}
-                      </button>
+                {fileTree.length > 0 ? (
+                  <div className="space-y-0.5">
+                    {fileTree.map((item) => (
+                      <FileTreeItem
+                        key={item.path}
+                        item={item}
+                        expandedFolders={expandedFolders}
+                        onToggle={toggleFolder}
+                        selectedPath={selectedFilePath}
+                        onSelect={selectFile}
+                      />
                     ))}
                   </div>
                 ) : (
                   <div className="flex flex-col items-center justify-center py-12 px-4 text-center">
-                    <File className="size-8 text-muted-foreground/50 mb-3" />
+                    <FolderTree className="size-8 text-muted-foreground/50 mb-3" />
                     <p className="text-sm text-muted-foreground">
-                      No files generated yet
+                      No files yet
                     </p>
                     <p className="text-[10px] text-muted-foreground mt-1">
-                      Start a conversation to generate code
+                      Ask AI to build your website
                     </p>
                   </div>
                 )}
               </ScrollArea>
 
-              {/* File actions */}
-              {currentFile && (
-                <div className="p-3 border-t border-border space-y-2">
-                  <div className="text-[10px] text-muted-foreground mb-2">
-                    <span className="font-medium">Language:</span> {currentFile.language}
-                    <br />
-                    <span className="font-medium">Status:</span> {currentFile.status}
+              {/* Project info */}
+              {currentProject && (
+                <div className="p-3 border-t border-border text-xs text-muted-foreground">
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="font-medium">{currentProject.name}</span>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button size="icon" variant="ghost" className="size-6">
+                          <MoreVertical className="size-3" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem>
+                          <Settings className="size-4 mr-2" />
+                          Project Settings
+                        </DropdownMenuItem>
+                        <DropdownMenuItem>
+                          <Download className="size-4 mr-2" />
+                          Export Project
+                        </DropdownMenuItem>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem className="text-destructive">
+                          <Trash2 className="size-4 mr-2" />
+                          Delete Project
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
                   </div>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="w-full"
-                    onClick={handleCopyCode}
-                  >
-                    {copied ? (
-                      <Check className="size-4 mr-2" />
-                    ) : (
-                      <Copy className="size-4 mr-2" />
-                    )}
-                    Copy Code
-                  </Button>
+                  <p className="truncate opacity-70">{currentProject.description}</p>
                 </div>
               )}
             </>
