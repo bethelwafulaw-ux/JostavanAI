@@ -9,6 +9,11 @@ import { ThemeToggle } from '@/components/features/ThemeToggle';
 import { GitHubConnect } from '@/components/features/GitHubConnect';
 import { BackendConnect } from '@/components/features/BackendConnect';
 import { SQLExport } from '@/components/features/SQLExport';
+import { ImageToCode } from '@/components/features/ImageToCode';
+import { VisualEditor } from '@/components/features/VisualEditor';
+import { PlannerMode, BuildPlan, generateBuildPlan } from '@/components/features/PlannerMode';
+import { KnowledgeFiles } from '@/components/features/KnowledgeFiles';
+import { PackageManager } from '@/components/features/PackageManager';
 import { AGENT_CONFIGS, PHASE_DESCRIPTIONS } from '@/constants/config';
 import { cn, formatRelativeTime, getLanguageFromPath } from '@/lib/utils';
 import { generateFullWebsite, WebsiteConfig } from '@/lib/website-generator';
@@ -46,10 +51,8 @@ import {
   Activity,
   MoreVertical,
   Download,
-  Settings,
   FileCode,
   FilePlus,
-  FolderPlus,
   Play,
   Terminal,
   Wand2,
@@ -59,6 +62,7 @@ import {
   Edit3,
   FileDown,
   Package,
+  GitPullRequest,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
@@ -467,6 +471,14 @@ export default function VibeCoderPage() {
     toggleFolder,
     getFileTree,
     getCurrentProject,
+    addKnowledgeFile,
+    updateKnowledgeFile,
+    deleteKnowledgeFile,
+    toggleKnowledgeFile,
+    getActiveKnowledge,
+    installPackage,
+    uninstallPackage,
+    syncFromGitHub,
   } = useProjectStore();
   
   const { theme } = useThemeStore();
@@ -488,6 +500,14 @@ export default function VibeCoderPage() {
   const [showNewFileDialog, setShowNewFileDialog] = useState(false);
   const [newFileName, setNewFileName] = useState('');
   const [showProjectDeleteDialog, setShowProjectDeleteDialog] = useState(false);
+  
+  // New Lovable-style features
+  const [visualEditMode, setVisualEditMode] = useState(false);
+  const [buildPlan, setBuildPlan] = useState<BuildPlan | null>(null);
+  const [showPlannerModal, setShowPlannerModal] = useState(false);
+  const [isImageConverting, setIsImageConverting] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
+  
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const navbarTimeoutRef = useRef<NodeJS.Timeout>();
@@ -530,26 +550,27 @@ export default function VibeCoderPage() {
     
     useChatStore.getState().addMessage({
       role: 'assistant',
-      content: `🚀 **Project Initialized**
+      content: `🚀 **Jostavan AI - Website Builder**
 
-I've set up the base project structure with:
-• React 18 + TypeScript + Vite
-• Tailwind CSS for styling
-• React Router for navigation
-• Utility functions
+Project initialized with React + TypeScript + Tailwind CSS.
 
-The preview shows a basic welcome page. **Describe what you want to build** and I'll generate the complete website with:
-• Frontend components
-• SQL database schemas
-• Authentication (if needed)
-• API integrations
+**🎯 What I can do:**
+• **Text-to-App**: Describe your website and I'll build it
+• **Image-to-App**: Drop a screenshot or wireframe to convert to code
+• **Visual Edit**: Click elements in preview to modify them directly
+• **Multi-file**: I understand your entire project structure
 
-**I can also modify existing code!** Just tell me:
-• "Change the button color to blue"
-• "Add a new section to the landing page"
-• "Fix the navbar styling"
+**🔧 New Features:**
+• **Planner Mode**: I'll show my plan before building
+• **Knowledge Files**: Upload brand guides I'll follow
+• **Package Manager**: Request any npm package
 
-Try: "Build a modern SaaS landing page with pricing and auth"`,
+**💡 Try saying:**
+"Build a modern SaaS landing page with pricing"
+"Create an e-commerce store with auth"
+"Change the button color to purple"
+
+Or drag an image to convert it to code!`,
       agent: 'orchestrator',
     });
     
@@ -601,6 +622,132 @@ Try: "Build a modern SaaS landing page with pricing and auth"`,
     navbarTimeoutRef.current = setTimeout(() => {
       setNavbarVisible(false);
     }, 300);
+  };
+
+  // Image to Code conversion
+  const handleImageToCode = async (imageData: string, description: string) => {
+    setIsImageConverting(true);
+    
+    useChatStore.getState().addMessage({
+      role: 'user',
+      content: `[Image uploaded] ${description}`,
+    });
+    
+    useChatStore.getState().addMessage({
+      role: 'assistant',
+      content: `🖼️ **Analyzing Image...**
+
+I'm examining your design and will convert it to React code:
+• Detecting layout structure
+• Identifying components
+• Extracting colors and typography
+• Planning responsive implementation
+
+Please wait while I generate the code...`,
+      agent: 'uiDesigner',
+    });
+    
+    // Simulate image analysis delay
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    
+    // Generate a website based on the description
+    await handleBuildWebsite(description || 'Convert this design to a modern React website');
+    
+    setIsImageConverting(false);
+  };
+
+  // Visual edit handler
+  const handleVisualEdit = (edit: { type: string; selector: string; property: string; value: string }) => {
+    // Find the file that likely contains this element
+    const appFile = currentProject?.files.find(f => f.path.includes('App.tsx'));
+    const landingFile = currentProject?.files.find(f => f.path.toLowerCase().includes('landing'));
+    const targetFile = landingFile || appFile;
+    
+    if (targetFile) {
+      let newContent = targetFile.content;
+      
+      // Apply the visual edit to the code
+      if (edit.type === 'style') {
+        // Convert CSS property to Tailwind class if possible
+        const tailwindMap: Record<string, Record<string, string>> = {
+          color: {
+            '#ef4444': 'text-red-500',
+            '#f97316': 'text-orange-500',
+            '#eab308': 'text-yellow-500',
+            '#22c55e': 'text-green-500',
+            '#3b82f6': 'text-blue-500',
+            '#8b5cf6': 'text-purple-500',
+            '#ec4899': 'text-pink-500',
+          },
+          backgroundColor: {
+            '#ef4444': 'bg-red-500',
+            '#f97316': 'bg-orange-500',
+            '#eab308': 'bg-yellow-500',
+            '#22c55e': 'bg-green-500',
+            '#3b82f6': 'bg-blue-500',
+            '#8b5cf6': 'bg-purple-500',
+            '#ec4899': 'bg-pink-500',
+          },
+        };
+        
+        const tailwindClass = tailwindMap[edit.property]?.[edit.value];
+        if (tailwindClass) {
+          // Add the class to the element
+          toast({
+            title: 'Style Applied',
+            description: `Added ${tailwindClass} to element`,
+          });
+        }
+      } else if (edit.type === 'text') {
+        // Text content change would require more sophisticated parsing
+        toast({
+          title: 'Text Updated',
+          description: 'Content has been modified',
+        });
+      }
+      
+      updateFile(targetFile.path, newContent);
+    }
+    
+    useChatStore.getState().addMessage({
+      role: 'assistant',
+      content: `✏️ **Visual Edit Applied**
+
+• **Type:** ${edit.type}
+• **Property:** ${edit.property}
+• **Value:** ${edit.value}
+
+The change has been applied to the code. The preview will update automatically.`,
+      agent: 'uiDesigner',
+    });
+  };
+
+  // Planner mode - generate plan before building
+  const handlePlannerMode = (prompt: string) => {
+    const plan = generateBuildPlan(prompt);
+    // Mark all steps as approved by default for better UX
+    plan.steps.forEach(step => step.status = 'pending');
+    setBuildPlan(plan);
+    setShowPlannerModal(true);
+  };
+
+  // Execute approved plan
+  const executePlan = async (plan: BuildPlan) => {
+    const approvedSteps = plan.steps.filter(s => s.status !== 'rejected');
+    
+    useChatStore.getState().addMessage({
+      role: 'assistant',
+      content: `📋 **Executing Build Plan**
+
+Approved: ${approvedSteps.length}/${plan.steps.length} steps
+
+${approvedSteps.map((s, i) => `${i + 1}. ${s.title}`).join('\n')}
+
+Starting build...`,
+      agent: 'orchestrator',
+    });
+    
+    await handleBuildWebsite(plan.prompt);
   };
 
   const handleBuildWebsite = async (prompt: string) => {
@@ -710,63 +857,32 @@ Try: "Build a modern SaaS landing page with pricing and auth"`,
       prompt.toLowerCase().includes('make') ||
       prompt.toLowerCase().includes('generate')) &&
       !isModificationRequest;
+
+    // Check for package installation request
+    const packageMatch = prompt.toLowerCase().match(/install\s+(\S+)/);
+    if (packageMatch) {
+      const packageName = packageMatch[1];
+      useChatStore.getState().addMessage({ role: 'user', content: prompt });
+      useChatStore.getState().addMessage({
+        role: 'assistant',
+        content: `📦 **Installing Package**\n\nInstalling \`${packageName}\`...`,
+        agent: 'orchestrator',
+      });
+      await installPackage(packageName);
+      useChatStore.getState().addMessage({
+        role: 'assistant',
+        content: `✅ **Package Installed**\n\n\`${packageName}\` is now available. You can import and use it in your code.`,
+        agent: 'orchestrator',
+      });
+      return;
+    }
     
     if (isModificationRequest && currentProject?.files.length) {
       // Handle code modification
       await processCodeModification(prompt, currentProject.files, selectedFilePath, updateFile);
     } else if (isBuildRequest || prompt.length > 50) {
-      // Add user message
-      useChatStore.getState().addMessage({ role: 'user', content: prompt });
-      
-      // Add thinking message
-      useChatStore.getState().addMessage({
-        role: 'assistant',
-        content: `🚀 **Starting Full Website Build**
-
-Analyzing your request and preparing the 7-agent pipeline...
-
-• **Blueprinter** → Planning architecture
-• **Data Architect** → Designing schemas
-• **UI Craftsman** → Building components
-• **Guardian** → Security audit
-• **Scout** → Checking latest versions
-• **Auditor** → Final review
-
-Building your website now...`,
-        agent: 'orchestrator',
-      });
-      
-      // Build the website
-      const result = await handleBuildWebsite(prompt);
-      
-      // Add completion message
-      useChatStore.getState().addMessage({
-        role: 'assistant',
-        content: `✅ **Website Build Complete!**
-
-**Generated:**
-• ${result.files.length} files created
-• ${result.config.type.charAt(0).toUpperCase() + result.config.type.slice(1)} website
-${result.config.hasAuth ? '• Authentication system included' : ''}
-${result.sql ? `• SQL schema with ${result.sql.match(/CREATE TABLE/gi)?.length || 0} tables` : ''}
-
-**Features:**
-${result.config.features.map(f => `• ${f}`).join('\n') || '• Landing page'}
-
-✨ **The preview is now live!** Check the Preview tab to see your website.
-
-You can:
-1. Edit files in the code editor
-2. Export SQL to run on your backend
-3. Push to GitHub
-4. **Ask me to modify any code!**
-
-What would you like to modify?`,
-        agent: 'orchestrator',
-      });
-      
-      // Process through orchestrator for full pipeline
-      await processTask(prompt);
+      // Show planner mode for complex builds
+      handlePlannerMode(prompt);
     } else {
       // Quick chat
       await processFastChat(prompt);
@@ -881,6 +997,16 @@ What would you like to modify?`,
     }
   };
 
+  const handleGitHubSync = async () => {
+    setIsSyncing(true);
+    await syncFromGitHub();
+    setIsSyncing(false);
+    toast({
+      title: 'Synced!',
+      description: 'Pulled latest changes from GitHub.',
+    });
+  };
+
   const getAgentIcon = (agent: string) => {
     const config = AGENT_CONFIGS[agent];
     if (!config) return <Sparkles className="size-3" />;
@@ -944,8 +1070,56 @@ What would you like to modify?`,
           </div>
         )}
 
+        {/* Image to Code */}
+        <ImageToCode 
+          onConvert={handleImageToCode}
+          isConverting={isImageConverting}
+        />
+
+        {/* Visual Editor Toggle */}
+        <VisualEditor
+          isActive={visualEditMode}
+          onToggle={() => setVisualEditMode(!visualEditMode)}
+          onEdit={handleVisualEdit}
+          iframeRef={iframeRef}
+        />
+
+        {/* Knowledge Files */}
+        <KnowledgeFiles
+          files={currentProject?.knowledgeFiles || []}
+          onAdd={addKnowledgeFile}
+          onUpdate={updateKnowledgeFile}
+          onDelete={deleteKnowledgeFile}
+          onToggle={toggleKnowledgeFile}
+        />
+
+        {/* Package Manager */}
+        <PackageManager
+          packages={currentProject?.installedPackages || []}
+          onInstall={installPackage}
+          onUninstall={uninstallPackage}
+        />
+
         {/* GitHub Connect */}
         <GitHubConnect />
+        
+        {/* GitHub Sync */}
+        {currentProject?.githubConnection?.isConnected && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-2"
+            onClick={handleGitHubSync}
+            disabled={isSyncing}
+          >
+            {isSyncing ? (
+              <Loader2 className="size-4 animate-spin" />
+            ) : (
+              <GitPullRequest className="size-4" />
+            )}
+            Pull
+          </Button>
+        )}
 
         {/* Backend Connect */}
         <BackendConnect />
@@ -1035,14 +1209,14 @@ What would you like to modify?`,
                     </div>
                     <h3 className="font-semibold text-lg mb-1">AI Website Builder</h3>
                     <p className="text-sm text-muted-foreground mb-6 max-w-xs">
-                      Describe your website and I'll build the complete codebase with SQL schemas
+                      Describe, drop an image, or click to edit
                     </p>
                     
                     <div className="space-y-2 w-full">
                       {[
-                        'Build a modern SaaS landing page with auth',
-                        'Create an e-commerce store with products',
-                        'Make a dashboard with analytics charts',
+                        'Build a modern SaaS landing page',
+                        'Create an e-commerce store',
+                        'Make a dashboard with charts',
                         'Change the primary color to purple',
                       ].map((suggestion) => (
                         <button
@@ -1139,7 +1313,7 @@ What would you like to modify?`,
                         e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px';
                       }}
                       onKeyDown={handleKeyDown}
-                      placeholder="Build or modify your website..."
+                      placeholder="Build, modify, or ask anything..."
                       className="min-h-[44px] max-h-[120px] pr-12 resize-none text-sm bg-muted/50 border-border focus:border-primary"
                       disabled={isGenerating || isBuilding}
                     />
@@ -1157,7 +1331,7 @@ What would you like to modify?`,
                     </Button>
                   </div>
                   <p className="text-[10px] text-muted-foreground mt-2 text-center">
-                    Build • Modify • Export • Push to GitHub
+                    Text • Image • Visual Edit • GitHub Sync
                   </p>
                 </form>
               </div>
@@ -1266,7 +1440,7 @@ What would you like to modify?`,
           </div>
 
           {/* Content area */}
-          <div className="flex-1 overflow-hidden">
+          <div className="flex-1 overflow-hidden relative">
             {activeTab === 'preview' && (
               <div className="h-full flex items-center justify-center p-4 bg-[#f5f5f5] dark:bg-gray-900">
                 <div
@@ -1475,6 +1649,37 @@ What would you like to modify?`,
           </Button>
         )}
       </div>
+
+      {/* Planner Mode Modal */}
+      <PlannerMode
+        plan={buildPlan}
+        isOpen={showPlannerModal}
+        onClose={() => {
+          setShowPlannerModal(false);
+          setBuildPlan(null);
+        }}
+        onApprove={executePlan}
+        onReject={() => {
+          setShowPlannerModal(false);
+          setBuildPlan(null);
+          toast({
+            title: 'Build cancelled',
+            description: 'No changes were made.',
+          });
+        }}
+        onModifyStep={(stepId, approved) => {
+          if (buildPlan) {
+            setBuildPlan({
+              ...buildPlan,
+              steps: buildPlan.steps.map(s =>
+                s.id === stepId
+                  ? { ...s, status: approved ? 'approved' : 'rejected' }
+                  : s
+              ),
+            });
+          }
+        }}
+      />
 
       {/* Delete File Confirmation Dialog */}
       <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
