@@ -51,14 +51,14 @@ export const AGENT_CONFIGS: Record<string, AgentConfig> = {
   blueprinter: {
     id: 'blueprinter',
     name: 'The Blueprinter',
-    role: 'PRD & Architecture',
-    description: 'Creates detailed product specs, logic flows, and system architecture',
+    role: 'Design Validation',
+    description: 'Validates design specs from Auditor - approves or requests more detail',
     icon: 'Layers',
     color: 'cyan',
     model: 'gemini-1.5-pro',
     provider: 'Google',
-    strengths: ['2M token context', 'Complex reasoning', 'Full project memory'],
-    phase: 1,
+    strengths: ['Design validation', 'Quality gate', 'Architecture review'],
+    phase: 2, // Now validates AFTER Auditor design analysis
   },
   dataLayer: {
     id: 'dataLayer',
@@ -123,37 +123,46 @@ export const AGENT_CONFIGS: Record<string, AgentConfig> = {
   finalCheck: {
     id: 'finalCheck',
     name: 'The Auditor',
-    role: 'Final QA & Fixes',
-    description: 'Logic audit, bug fixes, and autonomous refactoring before delivery',
+    role: 'Design Analysis & Code Review',
+    description: 'First analyzes requests for design specs, then runs 8-pass autonomous code review',
     icon: 'CheckCircle2',
     color: 'emerald',
     model: 'o1',
     provider: 'OpenAI',
-    strengths: ['Chain of thought', 'Deep reasoning', 'Autonomous fixes'],
-    phase: 7,
+    strengths: ['Design analysis', 'Multi-pass audit', '8x autonomous review', 'Self-fixing'],
+    phase: 1, // Now runs FIRST for design analysis
   },
 };
 
-// Agent execution order for full pipeline
+// Agent execution order for full pipeline (NEW v2.0 WORKFLOW)
+// 1. Auditor first (design analysis)
+// 2. Blueprinter (validation)
+// 3. Data Architect (schema)
+// 4. UI Craftsman (implementation)
+// 5. Guardian (security)
+// 6. Auditor again (8-pass review)
 export const AGENT_PIPELINE_ORDER: (keyof typeof AGENT_CONFIGS)[] = [
-  'blueprinter',
-  'dataLayer',
-  'uiDesigner',
-  'security',
-  'liveIntel',
-  'finalCheck',
+  'finalCheck',    // Phase 1: Design Analysis
+  'blueprinter',   // Phase 2: Validation
+  'dataLayer',     // Phase 3: Schema Generation
+  'uiDesigner',    // Phase 4: UI Implementation
+  'security',      // Phase 5: Security
+  'finalCheck',    // Phase 6: Multi-Pass Audit
+  'liveIntel',     // Phase 7: Version Check
 ];
 
-// Phase descriptions for UI
+// Phase descriptions for UI (NEW v2.0 WORKFLOW)
 export const PHASE_DESCRIPTIONS = {
   idle: 'Waiting for input...',
-  blueprinting: 'Creating project blueprint and architecture...',
-  dataLayer: 'Designing database schemas and relationships...',
-  uiDesign: 'Crafting UI components and styling...',
-  security: 'Implementing security measures...',
-  liveIntel: 'Gathering latest library versions and advisories...',
+  designAnalysis: 'Auditor analyzing request for design specs...',
+  blueprinting: 'Blueprinter validating design specifications...',
+  dataLayer: 'Data Architect generating database schema...',
+  uiDesign: 'UI Craftsman building components from design...',
+  security: 'Guardian implementing security measures...',
+  liveIntel: 'Scout checking library versions...',
   fastChat: 'Processing quick response...',
-  finalCheck: 'Running final audit and fixing bugs...',
+  finalCheck: 'Auditor running 8-pass autonomous code review...',
+  errorResolution: 'Fixing issues and re-auditing...',
   complete: 'All tasks completed successfully!',
 };
 
