@@ -45,12 +45,8 @@ import {
   CheckCircle2,
   Activity,
   MoreVertical,
-  Download,
-  Settings,
   FileCode,
   FilePlus,
-  FolderPlus,
-  Play,
   Terminal,
   Wand2,
   Trash2,
@@ -123,213 +119,6 @@ const phaseToNumber: Record<string, number> = {
   finalCheck: 7,
   complete: 8,
 };
-
-// Base project files that are auto-generated
-const BASE_PROJECT_FILES = [
-  {
-    path: 'package.json',
-    content: `{
-  "name": "my-website",
-  "private": true,
-  "version": "1.0.0",
-  "type": "module",
-  "scripts": {
-    "dev": "vite",
-    "build": "tsc && vite build",
-    "preview": "vite preview"
-  },
-  "dependencies": {
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1",
-    "react-router-dom": "^6.26.0",
-    "lucide-react": "^0.441.0",
-    "clsx": "^2.1.1",
-    "tailwind-merge": "^2.5.2"
-  },
-  "devDependencies": {
-    "@types/react": "^18.3.3",
-    "@types/react-dom": "^18.3.0",
-    "@vitejs/plugin-react": "^4.3.1",
-    "autoprefixer": "^10.4.20",
-    "postcss": "^8.4.41",
-    "tailwindcss": "^3.4.10",
-    "typescript": "^5.5.3",
-    "vite": "^5.4.1"
-  }
-}`,
-    language: 'json',
-  },
-  {
-    path: 'vite.config.ts',
-    content: `import { defineConfig } from 'vite';
-import react from '@vitejs/plugin-react';
-import path from 'path';
-
-export default defineConfig({
-  plugins: [react()],
-  resolve: {
-    alias: {
-      '@': path.resolve(__dirname, './src'),
-    },
-  },
-});`,
-    language: 'typescript',
-  },
-  {
-    path: 'tsconfig.json',
-    content: `{
-  "compilerOptions": {
-    "target": "ES2020",
-    "useDefineForClassFields": true,
-    "lib": ["ES2020", "DOM", "DOM.Iterable"],
-    "module": "ESNext",
-    "skipLibCheck": true,
-    "moduleResolution": "bundler",
-    "allowImportingTsExtensions": true,
-    "resolveJsonModule": true,
-    "isolatedModules": true,
-    "noEmit": true,
-    "jsx": "react-jsx",
-    "strict": true,
-    "baseUrl": ".",
-    "paths": {
-      "@/*": ["./src/*"]
-    }
-  },
-  "include": ["src"]
-}`,
-    language: 'json',
-  },
-  {
-    path: 'tailwind.config.ts',
-    content: `import type { Config } from 'tailwindcss';
-
-const config: Config = {
-  darkMode: ['class'],
-  content: ['./index.html', './src/**/*.{js,ts,jsx,tsx}'],
-  theme: {
-    extend: {
-      colors: {
-        border: 'hsl(var(--border))',
-        background: 'hsl(var(--background))',
-        foreground: 'hsl(var(--foreground))',
-        primary: {
-          DEFAULT: 'hsl(var(--primary))',
-          foreground: 'hsl(var(--primary-foreground))',
-        },
-        secondary: {
-          DEFAULT: 'hsl(var(--secondary))',
-          foreground: 'hsl(var(--secondary-foreground))',
-        },
-        muted: {
-          DEFAULT: 'hsl(var(--muted))',
-          foreground: 'hsl(var(--muted-foreground))',
-        },
-      },
-    },
-  },
-  plugins: [],
-};
-
-export default config;`,
-    language: 'typescript',
-  },
-  {
-    path: 'index.html',
-    content: `<!DOCTYPE html>
-<html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>My Website</title>
-  </head>
-  <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
-  </body>
-</html>`,
-    language: 'html',
-  },
-  {
-    path: 'src/main.tsx',
-    content: `import React from 'react';
-import ReactDOM from 'react-dom/client';
-import App from './App';
-import './index.css';
-
-ReactDOM.createRoot(document.getElementById('root')!).render(
-  <React.StrictMode>
-    <App />
-  </React.StrictMode>
-);`,
-    language: 'typescript',
-  },
-  {
-    path: 'src/index.css',
-    content: `@tailwind base;
-@tailwind components;
-@tailwind utilities;
-
-@layer base {
-  :root {
-    --background: 0 0% 100%;
-    --foreground: 222.2 84% 4.9%;
-    --primary: 221.2 83.2% 53.3%;
-    --primary-foreground: 210 40% 98%;
-    --secondary: 210 40% 96.1%;
-    --secondary-foreground: 222.2 47.4% 11.2%;
-    --muted: 210 40% 96.1%;
-    --muted-foreground: 215.4 16.3% 46.9%;
-    --border: 214.3 31.8% 91.4%;
-  }
-}
-
-* {
-  box-sizing: border-box;
-  margin: 0;
-  padding: 0;
-}
-
-body {
-  font-family: system-ui, -apple-system, sans-serif;
-  background: hsl(var(--background));
-  color: hsl(var(--foreground));
-}`,
-    language: 'css',
-  },
-  {
-    path: 'src/App.tsx',
-    content: `import { BrowserRouter, Routes, Route } from 'react-router-dom';
-
-export default function App() {
-  return (
-    <BrowserRouter>
-      <Routes>
-        <Route path="/" element={
-          <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-50">
-            <div className="text-center p-8">
-              <h1 className="text-4xl font-bold text-gray-900 mb-4">Welcome</h1>
-              <p className="text-gray-600">Your website is ready to be built!</p>
-            </div>
-          </div>
-        } />
-      </Routes>
-    </BrowserRouter>
-  );
-}`,
-    language: 'typescript',
-  },
-  {
-    path: 'src/lib/utils.ts',
-    content: `import { type ClassValue, clsx } from 'clsx';
-import { twMerge } from 'tailwind-merge';
-
-export function cn(...inputs: ClassValue[]) {
-  return twMerge(clsx(inputs));
-}`,
-    language: 'typescript',
-  },
-];
 
 // File tree component
 function FileTreeItem({ 
@@ -503,7 +292,7 @@ export default function VibeCoderPage() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [currentSession?.messages]);
 
-  // Initialize project with base files
+  // Initialize project (no default files - start empty)
   const initializeProject = useCallback(async () => {
     if (isInitialized) return;
     
@@ -513,14 +302,6 @@ export default function VibeCoderPage() {
       projectId = createProject('My Website', 'AI-generated website project');
     }
     
-    // Add base files with animation
-    for (const file of BASE_PROJECT_FILES) {
-      await new Promise(resolve => setTimeout(resolve, 50));
-      addFile(file.path, file.content, file.language);
-    }
-    
-    // Select App.tsx by default
-    selectFile('src/App.tsx');
     setIsInitialized(true);
     
     // Add initialization message
@@ -530,30 +311,32 @@ export default function VibeCoderPage() {
     
     useChatStore.getState().addMessage({
       role: 'assistant',
-      content: `🚀 **Project Initialized**
+      content: `🚀 **AI Website Builder Ready**
 
-I've set up the base project structure with:
-• React 18 + TypeScript + Vite
-• Tailwind CSS for styling
-• React Router for navigation
-• Utility functions
+I'm ready to build your complete website from scratch. **Describe what you want to build** and I'll generate:
 
-The preview shows a basic welcome page. **Describe what you want to build** and I'll generate the complete website with:
-• Frontend components
-• SQL database schemas
-• Authentication (if needed)
-• API integrations
+• **React Components** - Modern, responsive UI
+• **Pages & Routing** - Full navigation structure  
+• **SQL Database** - Tables, indexes, RLS policies
+• **Authentication** - Login/signup flows
+• **Styling** - Tailwind CSS with custom themes
 
-**I can also modify existing code!** Just tell me:
-• "Change the button color to blue"
+**Example prompts:**
+• "Build a modern SaaS landing page with pricing"
+• "Create an e-commerce store with product listings"
+• "Make a dashboard with analytics charts"
+• "Build a blog with posts and categories"
+
+**After building, I can modify any code!** Just say:
+• "Change the primary color to purple"
 • "Add a new section to the landing page"
-• "Fix the navbar styling"
+• "Make the buttons more rounded"
 
-Try: "Build a modern SaaS landing page with pricing and auth"`,
+What would you like me to build?`,
       agent: 'orchestrator',
     });
     
-  }, [isInitialized, currentProjectId, projects.length, createProject, addFile, selectFile, currentSessionId, createSession]);
+  }, [isInitialized, currentProjectId, projects.length, createProject, currentSessionId, createSession]);
 
   // Run initialization on mount
   useEffect(() => {
@@ -563,9 +346,16 @@ Try: "Build a modern SaaS landing page with pricing and auth"`,
   // Update preview when files change
   useEffect(() => {
     const project = getCurrentProject();
-    if (!project?.files.length) return;
+    if (!project?.files.length) {
+      // No files - show empty state
+      if (previewUrl) {
+        revokePreviewBlobURL(previewUrl);
+        setPreviewUrl('');
+      }
+      return;
+    }
     
-    // Generate preview HTML
+    // Generate preview HTML from actual file content
     const previewFiles = project.files.map(f => ({
       path: f.path,
       content: f.content,
@@ -653,9 +443,17 @@ Try: "Build a modern SaaS landing page with pricing and auth"`,
     // Generate website
     const { files, sql } = generateFullWebsite(config);
     
+    // Clear existing files first for a fresh build
+    const existingProject = getCurrentProject();
+    if (existingProject?.files) {
+      for (const file of existingProject.files) {
+        deleteFile(file.path);
+      }
+    }
+    
     // Add files to project with streaming effect
     for (const file of files) {
-      await new Promise(resolve => setTimeout(resolve, 100));
+      await new Promise(resolve => setTimeout(resolve, 80));
       addFile(file.path, file.content || '', getLanguageFromPath(file.path));
     }
     
@@ -664,8 +462,11 @@ Try: "Build a modern SaaS landing page with pricing and auth"`,
       setCurrentSQL(sql);
     }
     
-    // Select first file
-    if (files.length > 0) {
+    // Select App.tsx to show main code
+    const appFile = files.find(f => f.path === 'src/App.tsx');
+    if (appFile) {
+      selectFile(appFile.path);
+    } else if (files.length > 0) {
       selectFile(files[0].path);
     }
     
@@ -701,7 +502,8 @@ Try: "Build a modern SaaS landing page with pricing and auth"`,
       prompt.toLowerCase().includes('edit') ||
       prompt.toLowerCase().includes('add to') ||
       prompt.toLowerCase().includes('remove') ||
-      prompt.toLowerCase().includes('replace');
+      prompt.toLowerCase().includes('replace') ||
+      prompt.toLowerCase().includes('make the');
 
     // Check if it's a website build request
     const isBuildRequest = 
@@ -723,14 +525,14 @@ Try: "Build a modern SaaS landing page with pricing and auth"`,
         role: 'assistant',
         content: `🚀 **Starting Full Website Build**
 
-Analyzing your request and preparing the 7-agent pipeline...
+Analyzing your request and generating code...
 
 • **Blueprinter** → Planning architecture
 • **Data Architect** → Designing schemas
-• **UI Craftsman** → Building components
-• **Guardian** → Security audit
-• **Scout** → Checking latest versions
-• **Auditor** → Final review
+• **UI Craftsman** → Building React components
+• **Guardian** → Security review
+• **Scout** → Checking library versions
+• **Auditor** → Final code review
 
 Building your website now...`,
         agent: 'orchestrator',
@@ -744,24 +546,23 @@ Building your website now...`,
         role: 'assistant',
         content: `✅ **Website Build Complete!**
 
-**Generated:**
-• ${result.files.length} files created
-• ${result.config.type.charAt(0).toUpperCase() + result.config.type.slice(1)} website
-${result.config.hasAuth ? '• Authentication system included' : ''}
-${result.sql ? `• SQL schema with ${result.sql.match(/CREATE TABLE/gi)?.length || 0} tables` : ''}
+**Generated ${result.files.length} files:**
+${result.files.slice(0, 8).map(f => `• \`${f.path}\``).join('\n')}
+${result.files.length > 8 ? `• ...and ${result.files.length - 8} more files` : ''}
 
-**Features:**
-${result.config.features.map(f => `• ${f}`).join('\n') || '• Landing page'}
+**Website Type:** ${result.config.type.charAt(0).toUpperCase() + result.config.type.slice(1)}
+${result.config.hasAuth ? '**Auth:** Login/Signup included' : ''}
+${result.sql ? `**Database:** ${result.sql.match(/CREATE TABLE/gi)?.length || 0} SQL tables generated` : ''}
 
-✨ **The preview is now live!** Check the Preview tab to see your website.
+✨ **Preview is now live!** Check the Preview tab to see your website.
 
-You can:
-1. Edit files in the code editor
-2. Export SQL to run on your backend
+**Next steps:**
+1. View & edit files in the Code tab
+2. Export SQL to your database
 3. Push to GitHub
-4. **Ask me to modify any code!**
+4. **Ask me to modify anything!**
 
-What would you like to modify?`,
+What would you like to change?`,
         agent: 'orchestrator',
       });
       
@@ -1035,7 +836,7 @@ What would you like to modify?`,
                     </div>
                     <h3 className="font-semibold text-lg mb-1">AI Website Builder</h3>
                     <p className="text-sm text-muted-foreground mb-6 max-w-xs">
-                      Describe your website and I'll build the complete codebase with SQL schemas
+                      Describe your website and I'll generate the complete codebase
                     </p>
                     
                     <div className="space-y-2 w-full">
@@ -1043,18 +844,13 @@ What would you like to modify?`,
                         'Build a modern SaaS landing page with auth',
                         'Create an e-commerce store with products',
                         'Make a dashboard with analytics charts',
-                        'Change the primary color to purple',
                       ].map((suggestion) => (
                         <button
                           key={suggestion}
                           onClick={() => setInput(suggestion)}
                           className="w-full p-2.5 text-left text-xs rounded-lg border border-border hover:border-primary/50 hover:bg-muted/50 transition-colors"
                         >
-                          {suggestion.toLowerCase().includes('change') ? (
-                            <Edit3 className="size-3 inline mr-2 text-amber-500" />
-                          ) : (
-                            <Sparkles className="size-3 inline mr-2 text-primary" />
-                          )}
+                          <Sparkles className="size-3 inline mr-2 text-primary" />
                           {suggestion}
                         </button>
                       ))}
@@ -1139,7 +935,7 @@ What would you like to modify?`,
                         e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px';
                       }}
                       onKeyDown={handleKeyDown}
-                      placeholder="Build or modify your website..."
+                      placeholder="Describe what you want to build..."
                       className="min-h-[44px] max-h-[120px] pr-12 resize-none text-sm bg-muted/50 border-border focus:border-primary"
                       disabled={isGenerating || isBuilding}
                     />
@@ -1286,9 +1082,11 @@ What would you like to modify?`,
                     />
                   ) : (
                     <div className="h-full flex flex-col items-center justify-center p-8 text-gray-500">
-                      <Loader2 className="size-8 animate-spin mb-4 text-blue-500" />
-                      <h3 className="font-medium text-lg mb-2">Loading Preview...</h3>
-                      <p className="text-sm">Generating your website preview</p>
+                      <div className="w-16 h-16 bg-gradient-to-br from-blue-500 to-purple-600 rounded-2xl flex items-center justify-center mb-6 shadow-lg shadow-blue-500/25">
+                        <Wand2 className="size-8 text-white" />
+                      </div>
+                      <h3 className="font-medium text-lg mb-2 text-gray-900">No Preview Yet</h3>
+                      <p className="text-sm text-center max-w-sm">Tell the AI what you want to build and it will generate your website. The preview will appear here automatically.</p>
                     </div>
                   )}
                 </div>
@@ -1323,7 +1121,7 @@ What would you like to modify?`,
                       <FileCode className="size-16 text-muted-foreground/30 mx-auto mb-4" />
                       <h3 className="font-medium text-lg mb-2">No file selected</h3>
                       <p className="text-sm text-muted-foreground">
-                        Select a file from the tree to edit
+                        {currentProject?.files.length ? 'Select a file from the tree to edit' : 'Build a website to generate code files'}
                       </p>
                     </div>
                   </div>
@@ -1372,11 +1170,11 @@ What would you like to modify?`,
                 <div className="flex items-center gap-2">
                   <FolderTree className="size-4 text-muted-foreground" />
                   <span className="font-semibold text-sm">Files</span>
-                  {currentProject?.files.length && (
+                  {currentProject?.files.length ? (
                     <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-primary/10 text-primary">
                       {currentProject.files.length}
                     </span>
-                  )}
+                  ) : null}
                 </div>
                 <div className="flex items-center gap-1">
                   <Button size="icon" variant="ghost" className="size-7" onClick={() => setShowNewFileDialog(true)}>
@@ -1411,9 +1209,10 @@ What would you like to modify?`,
                   </div>
                 ) : (
                   <div className="flex flex-col items-center justify-center py-12 px-4 text-center">
-                    <Loader2 className="size-8 text-muted-foreground/50 mb-3 animate-spin" />
-                    <p className="text-sm text-muted-foreground">
-                      Initializing project...
+                    <FolderTree className="size-8 text-muted-foreground/50 mb-3" />
+                    <p className="text-sm text-muted-foreground mb-1">No files yet</p>
+                    <p className="text-xs text-muted-foreground/70">
+                      Ask the AI to build a website
                     </p>
                   </div>
                 )}
