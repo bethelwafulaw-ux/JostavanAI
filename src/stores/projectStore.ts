@@ -1,8 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { generateId } from '@/lib/utils';
-import { KnowledgeFile } from '@/components/features/KnowledgeFiles';
-import { InstalledPackage } from '@/components/features/PackageManager';
 
 export interface ProjectFile {
   id: string;
@@ -42,7 +40,6 @@ export interface GitHubConnection {
   isConnected: boolean;
   connectedAt?: string;
   repos?: { name: string; url: string; isPrivate: boolean }[];
-  lastSyncedAt?: string;
 }
 
 export interface Project {
@@ -54,8 +51,6 @@ export interface Project {
   backendConnection?: BackendConnection;
   githubConnection?: GitHubConnection;
   currentRepo?: string;
-  knowledgeFiles: KnowledgeFile[];
-  installedPackages: InstalledPackage[];
   createdAt: string;
   updatedAt: string;
 }
@@ -92,18 +87,6 @@ interface ProjectState {
   setGitHubConnection: (connection: GitHubConnection) => void;
   disconnectGitHub: () => void;
   setCurrentRepo: (repo: string) => void;
-  syncFromGitHub: () => Promise<void>;
-  
-  // Knowledge files
-  addKnowledgeFile: (file: Omit<KnowledgeFile, 'id' | 'createdAt'>) => void;
-  updateKnowledgeFile: (id: string, updates: Partial<KnowledgeFile>) => void;
-  deleteKnowledgeFile: (id: string) => void;
-  toggleKnowledgeFile: (id: string) => void;
-  getActiveKnowledge: () => string;
-  
-  // Package management
-  installPackage: (name: string, version?: string) => Promise<void>;
-  uninstallPackage: (name: string) => void;
 }
 
 function buildFileTree(files: ProjectFile[]): ProjectFile[] {
@@ -162,8 +145,6 @@ export const useProjectStore = create<ProjectState>()(
           description,
           files: [],
           sqlSchemas: [],
-          knowledgeFiles: [],
-          installedPackages: [],
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
         };
@@ -374,156 +355,6 @@ export const useProjectStore = create<ProjectState>()(
           projects: state.projects.map(p =>
             p.id === currentProjectId
               ? { ...p, currentRepo: repo }
-              : p
-          ),
-        }));
-      },
-      
-      syncFromGitHub: async () => {
-        const { currentProjectId, getCurrentProject } = get();
-        if (!currentProjectId) return;
-        
-        const project = getCurrentProject();
-        if (!project?.githubConnection?.isConnected || !project.currentRepo) return;
-        
-        // Simulate sync delay
-        await new Promise(resolve => setTimeout(resolve, 2000));
-        
-        // Update last synced timestamp
-        set(state => ({
-          projects: state.projects.map(p =>
-            p.id === currentProjectId && p.githubConnection
-              ? {
-                  ...p,
-                  githubConnection: {
-                    ...p.githubConnection,
-                    lastSyncedAt: new Date().toISOString(),
-                  },
-                }
-              : p
-          ),
-        }));
-      },
-      
-      // Knowledge files
-      addKnowledgeFile: (file) => {
-        const { currentProjectId } = get();
-        if (!currentProjectId) return;
-        
-        const newFile: KnowledgeFile = {
-          ...file,
-          id: generateId(),
-          createdAt: new Date().toISOString(),
-        };
-        
-        set(state => ({
-          projects: state.projects.map(p =>
-            p.id === currentProjectId
-              ? { ...p, knowledgeFiles: [...p.knowledgeFiles, newFile] }
-              : p
-          ),
-        }));
-      },
-      
-      updateKnowledgeFile: (id, updates) => {
-        const { currentProjectId } = get();
-        if (!currentProjectId) return;
-        
-        set(state => ({
-          projects: state.projects.map(p =>
-            p.id === currentProjectId
-              ? {
-                  ...p,
-                  knowledgeFiles: p.knowledgeFiles.map(f =>
-                    f.id === id ? { ...f, ...updates } : f
-                  ),
-                }
-              : p
-          ),
-        }));
-      },
-      
-      deleteKnowledgeFile: (id) => {
-        const { currentProjectId } = get();
-        if (!currentProjectId) return;
-        
-        set(state => ({
-          projects: state.projects.map(p =>
-            p.id === currentProjectId
-              ? { ...p, knowledgeFiles: p.knowledgeFiles.filter(f => f.id !== id) }
-              : p
-          ),
-        }));
-      },
-      
-      toggleKnowledgeFile: (id) => {
-        const { currentProjectId } = get();
-        if (!currentProjectId) return;
-        
-        set(state => ({
-          projects: state.projects.map(p =>
-            p.id === currentProjectId
-              ? {
-                  ...p,
-                  knowledgeFiles: p.knowledgeFiles.map(f =>
-                    f.id === id ? { ...f, isActive: !f.isActive } : f
-                  ),
-                }
-              : p
-          ),
-        }));
-      },
-      
-      getActiveKnowledge: () => {
-        const project = get().getCurrentProject();
-        if (!project) return '';
-        
-        const activeFiles = project.knowledgeFiles.filter(f => f.isActive);
-        if (activeFiles.length === 0) return '';
-        
-        return activeFiles.map(f => `## ${f.name}\n\n${f.content}`).join('\n\n---\n\n');
-      },
-      
-      // Package management
-      installPackage: async (name, version = 'latest') => {
-        const { currentProjectId } = get();
-        if (!currentProjectId) return;
-        
-        // Simulate installation
-        await new Promise(resolve => setTimeout(resolve, 1500));
-        
-        const newPackage: InstalledPackage = {
-          name,
-          version,
-          installedAt: new Date().toISOString(),
-        };
-        
-        set(state => ({
-          projects: state.projects.map(p =>
-            p.id === currentProjectId
-              ? {
-                  ...p,
-                  installedPackages: [
-                    ...p.installedPackages.filter(pkg => pkg.name !== name),
-                    newPackage,
-                  ],
-                }
-              : p
-          ),
-        }));
-      },
-      
-      uninstallPackage: (name) => {
-        const { currentProjectId } = get();
-        if (!currentProjectId) return;
-        
-        set(state => ({
-          projects: state.projects.map(p =>
-            p.id === currentProjectId
-              ? {
-                  ...p,
-                  installedPackages: p.installedPackages.filter(pkg => pkg.name !== name),
-                }
               : p
           ),
         }));
