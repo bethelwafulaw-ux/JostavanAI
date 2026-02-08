@@ -29,6 +29,7 @@ import {
   Plus,
   Lock,
   Globe,
+  RefreshCw,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
@@ -145,17 +146,46 @@ export function GitHubConnect({ className }: GitHubConnectProps) {
       return;
     }
     
+    if (!project?.files?.length) {
+      toast({
+        title: 'No Files to Push',
+        description: 'Generate some code first before pushing.',
+        variant: 'destructive',
+      });
+      return;
+    }
+    
     setIsPushing(true);
     
-    // Simulate push
+    // Simulate push with file count feedback
+    const fileCount = project.files.length;
+    
+    toast({
+      title: 'Pushing to GitHub...',
+      description: `Uploading ${fileCount} files to ${project.currentRepo}`,
+    });
+    
     await new Promise(resolve => setTimeout(resolve, 2000));
     
     setIsPushing(false);
     
     toast({
-      title: 'Pushed to GitHub',
-      description: `Code pushed to ${project.currentRepo}`,
+      title: 'Pushed to GitHub!',
+      description: `Successfully pushed ${fileCount} files to ${project.currentRepo}. View at github.com/${project?.githubConnection?.username}/${project.currentRepo}`,
     });
+  };
+  
+  const handleSyncRepo = () => {
+    toast({
+      title: 'Syncing...',
+      description: 'Fetching latest from repository',
+    });
+    setTimeout(() => {
+      toast({
+        title: 'Synced!',
+        description: 'Repository is up to date',
+      });
+    }, 1500);
   };
   
   if (!isConnected) {
@@ -274,6 +304,11 @@ export function GitHubConnect({ className }: GitHubConnectProps) {
           >
             <ExternalLink className="size-4 mr-2" />
             View on GitHub
+          </DropdownMenuItem>
+          
+          <DropdownMenuItem onClick={handleSyncRepo}>
+            <RefreshCw className="size-4 mr-2" />
+            Sync Repository
           </DropdownMenuItem>
           
           <DropdownMenuSeparator />

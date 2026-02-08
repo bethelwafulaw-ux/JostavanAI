@@ -13,6 +13,7 @@ import { AGENT_CONFIGS, PHASE_DESCRIPTIONS } from '@/constants/config';
 import { cn, formatRelativeTime, getLanguageFromPath } from '@/lib/utils';
 import { generateFullWebsite, WebsiteConfig } from '@/lib/website-generator';
 import { generatePreviewHTML, createPreviewBlobURL, revokePreviewBlobURL } from '@/lib/preview-renderer';
+import { downloadFile, exportProjectAsZip, copyProjectToClipboard } from '@/lib/file-export';
 import {
   Send,
   Plus,
@@ -55,6 +56,9 @@ import {
   Trash2,
   RefreshCw,
   ExternalLink,
+  Edit3,
+  FileDown,
+  Package,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
@@ -73,6 +77,25 @@ import {
   TabsList,
   TabsTrigger,
 } from '@/components/ui/tabs';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
 
 const navItems = [
   { path: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
@@ -315,7 +338,8 @@ function FileTreeItem({
   expandedFolders, 
   onToggle, 
   selectedPath, 
-  onSelect 
+  onSelect,
+  onDelete,
 }: {
   item: ProjectFile;
   depth?: number;
@@ -323,6 +347,7 @@ function FileTreeItem({
   onToggle: (path: string) => void;
   selectedPath: string | null;
   onSelect: (path: string) => void;
+  onDelete: (path: string) => void;
 }) {
   const isExpanded = expandedFolders.has(item.path);
   const isSelected = selectedPath === item.path;
@@ -356,6 +381,7 @@ function FileTreeItem({
                 onToggle={onToggle}
                 selectedPath={selectedPath}
                 onSelect={onSelect}
+                onDelete={onDelete}
               />
             ))}
           </div>
@@ -388,18 +414,29 @@ function FileTreeItem({
   };
   
   return (
-    <button
-      onClick={() => onSelect(item.path)}
-      className={cn(
-        'w-full flex items-center gap-1.5 px-2 py-1 text-left text-sm rounded transition-colors',
-        depth > 0 && 'ml-6',
-        isSelected ? 'bg-primary/10 text-primary' : 'hover:bg-muted/50'
-      )}
-    >
-      {getFileIcon(item.name)}
-      <span className="truncate font-mono text-xs">{item.name}</span>
-      {item.isModified && <span className="size-2 rounded-full bg-amber-500 ml-auto" />}
-    </button>
+    <div className="group relative">
+      <button
+        onClick={() => onSelect(item.path)}
+        className={cn(
+          'w-full flex items-center gap-1.5 px-2 py-1 text-left text-sm rounded transition-colors pr-8',
+          depth > 0 && 'ml-6',
+          isSelected ? 'bg-primary/10 text-primary' : 'hover:bg-muted/50'
+        )}
+      >
+        {getFileIcon(item.name)}
+        <span className="truncate font-mono text-xs">{item.name}</span>
+        {item.isModified && <span className="size-2 rounded-full bg-amber-500 ml-auto" />}
+      </button>
+      <button
+        onClick={(e) => {
+          e.stopPropagation();
+          onDelete(item.path);
+        }}
+        className="absolute right-1 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 p-1 hover:bg-destructive/20 rounded transition-all"
+      >
+        <Trash2 className="size-3 text-destructive" />
+      </button>
+    </div>
   );
 }
 
@@ -412,6 +449,7 @@ export default function VibeCoderPage() {
     createSession,
     processTask,
     processFastChat,
+    processCodeModification,
     setModel,
   } = useChatStore();
   
@@ -423,6 +461,8 @@ export default function VibeCoderPage() {
     createProject,
     addFile,
     updateFile,
+    deleteFile,
+    deleteProject,
     selectFile,
     toggleFolder,
     getFileTree,
@@ -443,6 +483,11 @@ export default function VibeCoderPage() {
   const [isInitialized, setIsInitialized] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string>('');
   const [projectType, setProjectType] = useState<string>('landing');
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [fileToDelete, setFileToDelete] = useState<string | null>(null);
+  const [showNewFileDialog, setShowNewFileDialog] = useState(false);
+  const [newFileName, setNewFileName] = useState('');
+  const [showProjectDeleteDialog, setShowProjectDeleteDialog] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const navbarTimeoutRef = useRef<NodeJS.Timeout>();
@@ -498,6 +543,11 @@ The preview shows a basic welcome page. **Describe what you want to build** and 
 • SQL database schemas
 • Authentication (if needed)
 • API integrations
+
+**I can also modify existing code!** Just tell me:
+• "Change the button color to blue"
+• "Add a new section to the landing page"
+• "Fix the navbar styling"
 
 Try: "Build a modern SaaS landing page with pricing and auth"`,
       agent: 'orchestrator',
@@ -642,15 +692,29 @@ Try: "Build a modern SaaS landing page with pricing and auth"`,
       textareaRef.current.style.height = 'auto';
     }
 
+    // Check if it's a code modification request
+    const isModificationRequest = 
+      prompt.toLowerCase().includes('change') ||
+      prompt.toLowerCase().includes('modify') ||
+      prompt.toLowerCase().includes('update') ||
+      prompt.toLowerCase().includes('fix') ||
+      prompt.toLowerCase().includes('edit') ||
+      prompt.toLowerCase().includes('add to') ||
+      prompt.toLowerCase().includes('remove') ||
+      prompt.toLowerCase().includes('replace');
+
     // Check if it's a website build request
     const isBuildRequest = 
-      prompt.toLowerCase().includes('build') ||
+      (prompt.toLowerCase().includes('build') ||
       prompt.toLowerCase().includes('create') ||
       prompt.toLowerCase().includes('make') ||
-      prompt.toLowerCase().includes('generate') ||
-      prompt.length > 50;
+      prompt.toLowerCase().includes('generate')) &&
+      !isModificationRequest;
     
-    if (isBuildRequest) {
+    if (isModificationRequest && currentProject?.files.length) {
+      // Handle code modification
+      await processCodeModification(prompt, currentProject.files, selectedFilePath, updateFile);
+    } else if (isBuildRequest || prompt.length > 50) {
       // Add user message
       useChatStore.getState().addMessage({ role: 'user', content: prompt });
       
@@ -695,7 +759,7 @@ You can:
 1. Edit files in the code editor
 2. Export SQL to run on your backend
 3. Push to GitHub
-4. Connect your database
+4. **Ask me to modify any code!**
 
 What would you like to modify?`,
         agent: 'orchestrator',
@@ -730,6 +794,79 @@ What would you like to modify?`,
         description: 'Code copied to clipboard.',
       });
     }
+  };
+
+  const handleDownloadFile = () => {
+    if (currentFile?.content) {
+      const filename = currentFile.path.split('/').pop() || 'file.txt';
+      downloadFile(filename, currentFile.content);
+      toast({
+        title: 'Downloaded!',
+        description: `${filename} has been downloaded.`,
+      });
+    }
+  };
+
+  const handleExportProject = () => {
+    if (currentProject?.files.length) {
+      exportProjectAsZip(currentProject.name, currentProject.files);
+      toast({
+        title: 'Project Exported!',
+        description: 'Your project has been downloaded as a ZIP file.',
+      });
+    } else {
+      toast({
+        title: 'No files to export',
+        description: 'Generate some code first.',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const handleDeleteProject = () => {
+    if (currentProjectId) {
+      deleteProject(currentProjectId);
+      setShowProjectDeleteDialog(false);
+      setIsInitialized(false);
+      toast({
+        title: 'Project Deleted',
+        description: 'Your project has been deleted.',
+      });
+    }
+  };
+
+  const handleDeleteFile = (path: string) => {
+    setFileToDelete(path);
+    setShowDeleteDialog(true);
+  };
+
+  const confirmDeleteFile = () => {
+    if (fileToDelete) {
+      deleteFile(fileToDelete);
+      if (selectedFilePath === fileToDelete) {
+        selectFile(null);
+      }
+      toast({
+        title: 'File Deleted',
+        description: `${fileToDelete} has been deleted.`,
+      });
+    }
+    setShowDeleteDialog(false);
+    setFileToDelete(null);
+  };
+
+  const handleCreateNewFile = () => {
+    if (!newFileName.trim()) return;
+    
+    const path = newFileName.startsWith('src/') ? newFileName : `src/${newFileName}`;
+    addFile(path, '', getLanguageFromPath(path));
+    selectFile(path);
+    setShowNewFileDialog(false);
+    setNewFileName('');
+    toast({
+      title: 'File Created',
+      description: `${path} has been created.`,
+    });
   };
 
   const handleEditorChange = (value: string | undefined) => {
@@ -906,14 +1043,18 @@ What would you like to modify?`,
                         'Build a modern SaaS landing page with auth',
                         'Create an e-commerce store with products',
                         'Make a dashboard with analytics charts',
-                        'Build a blog with user authentication',
+                        'Change the primary color to purple',
                       ].map((suggestion) => (
                         <button
                           key={suggestion}
                           onClick={() => setInput(suggestion)}
                           className="w-full p-2.5 text-left text-xs rounded-lg border border-border hover:border-primary/50 hover:bg-muted/50 transition-colors"
                         >
-                          <Sparkles className="size-3 inline mr-2 text-primary" />
+                          {suggestion.toLowerCase().includes('change') ? (
+                            <Edit3 className="size-3 inline mr-2 text-amber-500" />
+                          ) : (
+                            <Sparkles className="size-3 inline mr-2 text-primary" />
+                          )}
                           {suggestion}
                         </button>
                       ))}
@@ -998,7 +1139,7 @@ What would you like to modify?`,
                         e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px';
                       }}
                       onKeyDown={handleKeyDown}
-                      placeholder="Describe the website you want to build..."
+                      placeholder="Build or modify your website..."
                       className="min-h-[44px] max-h-[120px] pr-12 resize-none text-sm bg-muted/50 border-border focus:border-primary"
                       disabled={isGenerating || isBuilding}
                     />
@@ -1016,7 +1157,7 @@ What would you like to modify?`,
                     </Button>
                   </div>
                   <p className="text-[10px] text-muted-foreground mt-2 text-center">
-                    Full codebase control • SQL generation • GitHub push
+                    Build • Modify • Export • Push to GitHub
                   </p>
                 </form>
               </div>
@@ -1105,16 +1246,22 @@ What would you like to modify?`,
               )}
 
               {/* Actions */}
-              {activeTab === 'code' && (
+              {activeTab === 'code' && currentFile && (
                 <>
-                  <Button size="icon" variant="ghost" className="size-7" onClick={handleCopyCode}>
+                  <Button size="icon" variant="ghost" className="size-7" onClick={handleCopyCode} title="Copy code">
                     {copied ? <Check className="size-4" /> : <Copy className="size-4" />}
                   </Button>
-                  <Button size="icon" variant="ghost" className="size-7">
-                    <Download className="size-4" />
+                  <Button size="icon" variant="ghost" className="size-7" onClick={handleDownloadFile} title="Download file">
+                    <FileDown className="size-4" />
                   </Button>
                 </>
               )}
+              
+              {/* Export project button */}
+              <Button size="sm" variant="outline" className="gap-1.5 h-7 text-xs" onClick={handleExportProject}>
+                <Package className="size-3" />
+                Export ZIP
+              </Button>
             </div>
           </div>
 
@@ -1200,7 +1347,7 @@ What would you like to modify?`,
                   <p>✓ Preview is running above</p>
                   <p>• Connect your backend to run SQL migrations</p>
                   <p>• Push to GitHub and deploy to production</p>
-                  <p>• Or download the code and run locally</p>
+                  <p>• Or export ZIP and run locally</p>
                 </div>
                 <div className="mt-4 flex items-center gap-2">
                   <span className="text-gray-500">$</span>
@@ -1232,11 +1379,8 @@ What would you like to modify?`,
                   )}
                 </div>
                 <div className="flex items-center gap-1">
-                  <Button size="icon" variant="ghost" className="size-7">
+                  <Button size="icon" variant="ghost" className="size-7" onClick={() => setShowNewFileDialog(true)}>
                     <FilePlus className="size-4" />
-                  </Button>
-                  <Button size="icon" variant="ghost" className="size-7">
-                    <FolderPlus className="size-4" />
                   </Button>
                   <Button
                     size="icon"
@@ -1261,6 +1405,7 @@ What would you like to modify?`,
                         onToggle={toggleFolder}
                         selectedPath={selectedFilePath}
                         onSelect={selectFile}
+                        onDelete={handleDeleteFile}
                       />
                     ))}
                   </div>
@@ -1286,16 +1431,25 @@ What would you like to modify?`,
                         </Button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
-                        <DropdownMenuItem>
-                          <Settings className="size-4 mr-2" />
-                          Project Settings
+                        <DropdownMenuItem onClick={handleExportProject}>
+                          <Package className="size-4 mr-2" />
+                          Export as ZIP
                         </DropdownMenuItem>
-                        <DropdownMenuItem>
-                          <Download className="size-4 mr-2" />
-                          Export Project
+                        <DropdownMenuItem onClick={() => {
+                          if (currentProject?.files.length) {
+                            const text = copyProjectToClipboard(currentProject.files);
+                            navigator.clipboard.writeText(text);
+                            toast({ title: 'Copied!', description: 'All code copied to clipboard.' });
+                          }
+                        }}>
+                          <Copy className="size-4 mr-2" />
+                          Copy All Code
                         </DropdownMenuItem>
                         <DropdownMenuSeparator />
-                        <DropdownMenuItem className="text-destructive">
+                        <DropdownMenuItem 
+                          className="text-destructive"
+                          onClick={() => setShowProjectDeleteDialog(true)}
+                        >
                           <Trash2 className="size-4 mr-2" />
                           Delete Project
                         </DropdownMenuItem>
@@ -1321,6 +1475,64 @@ What would you like to modify?`,
           </Button>
         )}
       </div>
+
+      {/* Delete File Confirmation Dialog */}
+      <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete File</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete <code className="bg-muted px-1 rounded">{fileToDelete}</code>? This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmDeleteFile} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Delete Project Confirmation Dialog */}
+      <AlertDialog open={showProjectDeleteDialog} onOpenChange={setShowProjectDeleteDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Project</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete the entire project "{currentProject?.name}"? All files and data will be permanently lost.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDeleteProject} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+              Delete Project
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* New File Dialog */}
+      <Dialog open={showNewFileDialog} onOpenChange={setShowNewFileDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Create New File</DialogTitle>
+            <DialogDescription>
+              Enter the file path (e.g., src/components/Button.tsx)
+            </DialogDescription>
+          </DialogHeader>
+          <Input
+            value={newFileName}
+            onChange={(e) => setNewFileName(e.target.value)}
+            placeholder="src/components/NewComponent.tsx"
+            onKeyDown={(e) => e.key === 'Enter' && handleCreateNewFile()}
+          />
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowNewFileDialog(false)}>Cancel</Button>
+            <Button onClick={handleCreateNewFile} disabled={!newFileName.trim()}>Create</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

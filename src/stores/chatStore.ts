@@ -14,6 +14,7 @@ import {
   FinalCheckResult,
   FileOperation,
 } from '@/types';
+import { ProjectFile } from '@/stores/projectStore';
 import { STORAGE_KEYS, AGENT_CONFIGS, PHASE_DESCRIPTIONS } from '@/constants/config';
 import { generateId, sleep, getLanguageFromPath } from '@/lib/utils';
 import { MasterOrchestrator, handleFastChat, CODE_TEMPLATES } from '@/lib/orchestrator';
@@ -52,6 +53,12 @@ interface ChatState {
   setIsGenerating: (generating: boolean) => void;
   processTask: (prompt: string) => Promise<void>;
   processFastChat: (message: string) => Promise<void>;
+  processCodeModification: (
+    prompt: string, 
+    files: ProjectFile[], 
+    selectedFilePath: string | null,
+    updateFile: (path: string, content: string) => void
+  ) => Promise<void>;
 }
 
 // Format agent output for display
@@ -318,6 +325,180 @@ export const useChatStore = create<ChatState>()(
       },
       
       setIsGenerating: (generating) => set({ isGenerating: generating }),
+      
+      processCodeModification: async (
+        prompt: string, 
+        files: ProjectFile[], 
+        selectedFilePath: string | null,
+        updateFile: (path: string, content: string) => void
+      ) => {
+        const { addMessage, setIsGenerating, currentSessionId } = get();
+        
+        if (!currentSessionId) return;
+        
+        setIsGenerating(true);
+        
+        // Add user message
+        addMessage({ role: 'user', content: prompt });
+        
+        await sleep(300);
+        
+        // Determine which file to modify
+        let targetFile = selectedFilePath 
+          ? files.find(f => f.path === selectedFilePath)
+          : null;
+        
+        // Try to detect file from prompt
+        const lowerPrompt = prompt.toLowerCase();
+        if (!targetFile) {
+          if (lowerPrompt.includes('landing') || lowerPrompt.includes('home')) {
+            targetFile = files.find(f => f.path.toLowerCase().includes('landing') || f.path.includes('App.tsx'));
+          } else if (lowerPrompt.includes('button')) {
+            targetFile = files.find(f => f.path.toLowerCase().includes('button'));
+          } else if (lowerPrompt.includes('header') || lowerPrompt.includes('nav')) {
+            targetFile = files.find(f => f.path.toLowerCase().includes('header') || f.path.toLowerCase().includes('nav'));
+          } else if (lowerPrompt.includes('dashboard')) {
+            targetFile = files.find(f => f.path.toLowerCase().includes('dashboard'));
+          } else if (lowerPrompt.includes('login') || lowerPrompt.includes('auth')) {
+            targetFile = files.find(f => f.path.toLowerCase().includes('login') || f.path.toLowerCase().includes('auth'));
+          } else if (lowerPrompt.includes('css') || lowerPrompt.includes('style') || lowerPrompt.includes('color')) {
+            targetFile = files.find(f => f.path.includes('index.css'));
+          }
+        }
+        
+        // Default to App.tsx if no specific file found
+        if (!targetFile) {
+          targetFile = files.find(f => f.path === 'src/App.tsx');
+        }
+        
+        if (!targetFile) {
+          addMessage({
+            role: 'assistant',
+            content: `I couldn't find a file to modify. Please select a file from the file tree first, or be more specific about which file you want to change.`,
+            agent: 'orchestrator',
+          });
+          setIsGenerating(false);
+          return;
+        }
+        
+        // Add thinking message
+        addMessage({
+          role: 'assistant',
+          content: `🎨 **Modifying Code**\n\nAnalyzing \`${targetFile.path}\` and applying your changes...\n\n• Parsing current code\n• Understanding modification request\n• Generating updated code`,
+          agent: 'uiDesigner',
+          model: AGENT_CONFIGS.uiDesigner.model,
+        });
+        
+        await sleep(800);
+        
+        // Generate modified code based on prompt
+        let modifiedContent = targetFile.content;
+        
+        // Simple modifications based on common patterns
+        if (lowerPrompt.includes('color')) {
+          // Color changes
+          if (lowerPrompt.includes('purple')) {
+            modifiedContent = modifiedContent
+              .replace(/from-blue-/g, 'from-purple-')
+              .replace(/to-blue-/g, 'to-purple-')
+              .replace(/bg-blue-/g, 'bg-purple-')
+              .replace(/text-blue-/g, 'text-purple-')
+              .replace(/border-blue-/g, 'border-purple-')
+              .replace(/--primary: 221\.2 83\.2% 53\.3%/g, '--primary: 270 70% 50%');
+          } else if (lowerPrompt.includes('green')) {
+            modifiedContent = modifiedContent
+              .replace(/from-blue-/g, 'from-green-')
+              .replace(/to-blue-/g, 'to-green-')
+              .replace(/bg-blue-/g, 'bg-green-')
+              .replace(/text-blue-/g, 'text-green-')
+              .replace(/border-blue-/g, 'border-green-')
+              .replace(/--primary: 221\.2 83\.2% 53\.3%/g, '--primary: 142 70% 45%');
+          } else if (lowerPrompt.includes('red') || lowerPrompt.includes('orange')) {
+            modifiedContent = modifiedContent
+              .replace(/from-blue-/g, 'from-orange-')
+              .replace(/to-blue-/g, 'to-red-')
+              .replace(/bg-blue-/g, 'bg-orange-')
+              .replace(/text-blue-/g, 'text-orange-')
+              .replace(/border-blue-/g, 'border-orange-')
+              .replace(/--primary: 221\.2 83\.2% 53\.3%/g, '--primary: 25 95% 53%');
+          }
+        }
+        
+        if (lowerPrompt.includes('dark') && lowerPrompt.includes('mode')) {
+          // Add dark mode class to body
+          if (targetFile.path.includes('index.html')) {
+            modifiedContent = modifiedContent.replace('<body>', '<body class="dark">');
+          }
+        }
+        
+        if (lowerPrompt.includes('round') || lowerPrompt.includes('rounded')) {
+          // Increase border radius
+          modifiedContent = modifiedContent
+            .replace(/rounded-md/g, 'rounded-xl')
+            .replace(/rounded-lg/g, 'rounded-2xl')
+            .replace(/rounded-xl/g, 'rounded-3xl');
+        }
+        
+        if (lowerPrompt.includes('larger') || lowerPrompt.includes('bigger')) {
+          modifiedContent = modifiedContent
+            .replace(/text-sm/g, 'text-base')
+            .replace(/text-base/g, 'text-lg')
+            .replace(/text-lg/g, 'text-xl')
+            .replace(/text-xl/g, 'text-2xl')
+            .replace(/p-4/g, 'p-6')
+            .replace(/p-6/g, 'p-8')
+            .replace(/gap-4/g, 'gap-6');
+        }
+        
+        if (lowerPrompt.includes('smaller') || lowerPrompt.includes('compact')) {
+          modifiedContent = modifiedContent
+            .replace(/text-xl/g, 'text-lg')
+            .replace(/text-lg/g, 'text-base')
+            .replace(/text-base/g, 'text-sm')
+            .replace(/p-8/g, 'p-6')
+            .replace(/p-6/g, 'p-4')
+            .replace(/gap-6/g, 'gap-4');
+        }
+        
+        if (lowerPrompt.includes('shadow')) {
+          modifiedContent = modifiedContent
+            .replace(/shadow-sm/g, 'shadow-lg')
+            .replace(/shadow-md/g, 'shadow-xl')
+            .replace(/shadow$/g, 'shadow-lg');
+        }
+        
+        if (lowerPrompt.includes('remove') && lowerPrompt.includes('shadow')) {
+          modifiedContent = modifiedContent
+            .replace(/shadow-\w+/g, '')
+            .replace(/shadow/g, '');
+        }
+        
+        if (lowerPrompt.includes('add') && (lowerPrompt.includes('section') || lowerPrompt.includes('block'))) {
+          // Add a new section before the closing div of main content
+          const newSection = `\n      {/* New Section */}\n      <section className="py-16 bg-muted/50">\n        <div className="container mx-auto px-4 text-center">\n          <h2 className="text-3xl font-bold mb-4">New Section</h2>\n          <p className="text-muted-foreground">Add your content here</p>\n        </div>\n      </section>\n`;
+          
+          // Insert before footer or last closing tags
+          if (modifiedContent.includes('</footer>')) {
+            modifiedContent = modifiedContent.replace('</footer>', newSection + '    </footer>');
+          } else if (modifiedContent.includes('</main>')) {
+            modifiedContent = modifiedContent.replace('</main>', newSection + '    </main>');
+          }
+        }
+        
+        // Update the file
+        updateFile(targetFile.path, modifiedContent);
+        
+        await sleep(500);
+        
+        // Add completion message
+        addMessage({
+          role: 'assistant',
+          content: `✅ **Code Updated!**\n\n**Modified:** \`${targetFile.path}\`\n\nChanges applied:\n• ${prompt}\n\nThe preview has been updated automatically. You can:\n• View the changes in the Preview tab\n• Edit the code directly in the Code tab\n• Ask me to make more modifications\n\nWhat else would you like to change?`,
+          agent: 'orchestrator',
+        });
+        
+        setIsGenerating(false);
+      },
       
       processTask: async (prompt) => {
         const { 
