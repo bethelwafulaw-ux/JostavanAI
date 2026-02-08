@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { useChatStore } from '@/stores/chatStore';
 import { useProjectStore, ProjectFile } from '@/stores/projectStore';
@@ -12,11 +12,10 @@ import { SQLExport } from '@/components/features/SQLExport';
 import { AGENT_CONFIGS, PHASE_DESCRIPTIONS } from '@/constants/config';
 import { cn, formatRelativeTime, getLanguageFromPath } from '@/lib/utils';
 import { generateFullWebsite, WebsiteConfig } from '@/lib/website-generator';
+import { generatePreviewHTML, createPreviewBlobURL, revokePreviewBlobURL } from '@/lib/preview-renderer';
 import {
   Send,
   Plus,
-  MessageSquare,
-  Trash2,
   File,
   Folder,
   FolderOpen,
@@ -35,32 +34,27 @@ import {
   Key,
   BookOpen,
   BarChart3,
-  ChevronDown,
   ChevronRight,
   Monitor,
   Smartphone,
   Tablet,
-  ExternalLink,
   Brain,
-  Layers,
   Database,
-  Palette,
-  Shield,
-  Globe,
   Zap,
   CheckCircle2,
   Activity,
   MoreVertical,
   Download,
-  RefreshCw,
   Settings,
   FileCode,
   FilePlus,
   FolderPlus,
-  X,
   Play,
   Terminal,
   Wand2,
+  Trash2,
+  RefreshCw,
+  ExternalLink,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
@@ -76,7 +70,6 @@ import {
 } from '@/components/ui/dropdown-menu';
 import {
   Tabs,
-  TabsContent,
   TabsList,
   TabsTrigger,
 } from '@/components/ui/tabs';
@@ -107,6 +100,213 @@ const phaseToNumber: Record<string, number> = {
   finalCheck: 7,
   complete: 8,
 };
+
+// Base project files that are auto-generated
+const BASE_PROJECT_FILES = [
+  {
+    path: 'package.json',
+    content: `{
+  "name": "my-website",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.26.0",
+    "lucide-react": "^0.441.0",
+    "clsx": "^2.1.1",
+    "tailwind-merge": "^2.5.2"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.1",
+    "autoprefixer": "^10.4.20",
+    "postcss": "^8.4.41",
+    "tailwindcss": "^3.4.10",
+    "typescript": "^5.5.3",
+    "vite": "^5.4.1"
+  }
+}`,
+    language: 'json',
+  },
+  {
+    path: 'vite.config.ts',
+    content: `import { defineConfig } from 'vite';
+import react from '@vitejs/plugin-react';
+import path from 'path';
+
+export default defineConfig({
+  plugins: [react()],
+  resolve: {
+    alias: {
+      '@': path.resolve(__dirname, './src'),
+    },
+  },
+});`,
+    language: 'typescript',
+  },
+  {
+    path: 'tsconfig.json',
+    content: `{
+  "compilerOptions": {
+    "target": "ES2020",
+    "useDefineForClassFields": true,
+    "lib": ["ES2020", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "skipLibCheck": true,
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "noEmit": true,
+    "jsx": "react-jsx",
+    "strict": true,
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./src/*"]
+    }
+  },
+  "include": ["src"]
+}`,
+    language: 'json',
+  },
+  {
+    path: 'tailwind.config.ts',
+    content: `import type { Config } from 'tailwindcss';
+
+const config: Config = {
+  darkMode: ['class'],
+  content: ['./index.html', './src/**/*.{js,ts,jsx,tsx}'],
+  theme: {
+    extend: {
+      colors: {
+        border: 'hsl(var(--border))',
+        background: 'hsl(var(--background))',
+        foreground: 'hsl(var(--foreground))',
+        primary: {
+          DEFAULT: 'hsl(var(--primary))',
+          foreground: 'hsl(var(--primary-foreground))',
+        },
+        secondary: {
+          DEFAULT: 'hsl(var(--secondary))',
+          foreground: 'hsl(var(--secondary-foreground))',
+        },
+        muted: {
+          DEFAULT: 'hsl(var(--muted))',
+          foreground: 'hsl(var(--muted-foreground))',
+        },
+      },
+    },
+  },
+  plugins: [],
+};
+
+export default config;`,
+    language: 'typescript',
+  },
+  {
+    path: 'index.html',
+    content: `<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>My Website</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>`,
+    language: 'html',
+  },
+  {
+    path: 'src/main.tsx',
+    content: `import React from 'react';
+import ReactDOM from 'react-dom/client';
+import App from './App';
+import './index.css';
+
+ReactDOM.createRoot(document.getElementById('root')!).render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>
+);`,
+    language: 'typescript',
+  },
+  {
+    path: 'src/index.css',
+    content: `@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 222.2 84% 4.9%;
+    --primary: 221.2 83.2% 53.3%;
+    --primary-foreground: 210 40% 98%;
+    --secondary: 210 40% 96.1%;
+    --secondary-foreground: 222.2 47.4% 11.2%;
+    --muted: 210 40% 96.1%;
+    --muted-foreground: 215.4 16.3% 46.9%;
+    --border: 214.3 31.8% 91.4%;
+  }
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: system-ui, -apple-system, sans-serif;
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
+}`,
+    language: 'css',
+  },
+  {
+    path: 'src/App.tsx',
+    content: `import { BrowserRouter, Routes, Route } from 'react-router-dom';
+
+export default function App() {
+  return (
+    <BrowserRouter>
+      <Routes>
+        <Route path="/" element={
+          <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-50">
+            <div className="text-center p-8">
+              <h1 className="text-4xl font-bold text-gray-900 mb-4">Welcome</h1>
+              <p className="text-gray-600">Your website is ready to be built!</p>
+            </div>
+          </div>
+        } />
+      </Routes>
+    </BrowserRouter>
+  );
+}`,
+    language: 'typescript',
+  },
+  {
+    path: 'src/lib/utils.ts',
+    content: `import { type ClassValue, clsx } from 'clsx';
+import { twMerge } from 'tailwind-merge';
+
+export function cn(...inputs: ClassValue[]) {
+  return twMerge(clsx(inputs));
+}`,
+    language: 'typescript',
+  },
+];
 
 // File tree component
 function FileTreeItem({ 
@@ -164,7 +364,6 @@ function FileTreeItem({
     );
   }
   
-  // Get file icon based on extension
   const getFileIcon = (name: string) => {
     const ext = name.split('.').pop()?.toLowerCase();
     const iconClass = 'size-4';
@@ -211,8 +410,6 @@ export default function VibeCoderPage() {
     isGenerating,
     currentPhase,
     createSession,
-    selectSession,
-    deleteSession,
     processTask,
     processFastChat,
     setModel,
@@ -224,7 +421,6 @@ export default function VibeCoderPage() {
     selectedFilePath,
     expandedFolders,
     createProject,
-    selectProject,
     addFile,
     updateFile,
     selectFile,
@@ -241,13 +437,16 @@ export default function VibeCoderPage() {
   const [copied, setCopied] = useState(false);
   const [navbarVisible, setNavbarVisible] = useState(false);
   const [viewport, setViewport] = useState<ViewportSize>('desktop');
-  const [showCode, setShowCode] = useState(true);
-  const [activeTab, setActiveTab] = useState<'code' | 'preview' | 'terminal'>('code');
+  const [activeTab, setActiveTab] = useState<'code' | 'preview' | 'terminal'>('preview');
   const [currentSQL, setCurrentSQL] = useState('');
   const [isBuilding, setIsBuilding] = useState(false);
+  const [isInitialized, setIsInitialized] = useState(false);
+  const [previewUrl, setPreviewUrl] = useState<string>('');
+  const [projectType, setProjectType] = useState<string>('landing');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const navbarTimeoutRef = useRef<NodeJS.Timeout>();
+  const iframeRef = useRef<HTMLIFrameElement>(null);
 
   const currentSession = sessions.find((s) => s.id === currentSessionId);
   const currentProject = getCurrentProject();
@@ -259,12 +458,87 @@ export default function VibeCoderPage() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [currentSession?.messages]);
 
-  // Initialize project if none exists
-  useEffect(() => {
-    if (!currentProjectId && projects.length === 0) {
-      createProject('My Website', 'AI-generated website project');
+  // Initialize project with base files
+  const initializeProject = useCallback(async () => {
+    if (isInitialized) return;
+    
+    // Create project if needed
+    let projectId = currentProjectId;
+    if (!projectId && projects.length === 0) {
+      projectId = createProject('My Website', 'AI-generated website project');
     }
-  }, [currentProjectId, projects.length, createProject]);
+    
+    // Add base files with animation
+    for (const file of BASE_PROJECT_FILES) {
+      await new Promise(resolve => setTimeout(resolve, 50));
+      addFile(file.path, file.content, file.language);
+    }
+    
+    // Select App.tsx by default
+    selectFile('src/App.tsx');
+    setIsInitialized(true);
+    
+    // Add initialization message
+    if (!currentSessionId) {
+      createSession();
+    }
+    
+    useChatStore.getState().addMessage({
+      role: 'assistant',
+      content: `🚀 **Project Initialized**
+
+I've set up the base project structure with:
+• React 18 + TypeScript + Vite
+• Tailwind CSS for styling
+• React Router for navigation
+• Utility functions
+
+The preview shows a basic welcome page. **Describe what you want to build** and I'll generate the complete website with:
+• Frontend components
+• SQL database schemas
+• Authentication (if needed)
+• API integrations
+
+Try: "Build a modern SaaS landing page with pricing and auth"`,
+      agent: 'orchestrator',
+    });
+    
+  }, [isInitialized, currentProjectId, projects.length, createProject, addFile, selectFile, currentSessionId, createSession]);
+
+  // Run initialization on mount
+  useEffect(() => {
+    initializeProject();
+  }, [initializeProject]);
+
+  // Update preview when files change
+  useEffect(() => {
+    const project = getCurrentProject();
+    if (!project?.files.length) return;
+    
+    // Generate preview HTML
+    const previewFiles = project.files.map(f => ({
+      path: f.path,
+      content: f.content,
+      language: f.language,
+    }));
+    
+    const html = generatePreviewHTML(previewFiles, projectType);
+    
+    // Cleanup old blob URL
+    if (previewUrl) {
+      revokePreviewBlobURL(previewUrl);
+    }
+    
+    // Create new blob URL
+    const newUrl = createPreviewBlobURL(html);
+    setPreviewUrl(newUrl);
+    
+    return () => {
+      if (newUrl) {
+        revokePreviewBlobURL(newUrl);
+      }
+    };
+  }, [currentProject?.files, projectType, getCurrentProject]);
 
   const handleNavbarEnter = () => {
     if (navbarTimeoutRef.current) {
@@ -282,7 +556,6 @@ export default function VibeCoderPage() {
   const handleBuildWebsite = async (prompt: string) => {
     setIsBuilding(true);
     
-    // Analyze prompt to determine website type
     const lowerPrompt = prompt.toLowerCase();
     const config: WebsiteConfig = {
       name: 'My Website',
@@ -297,27 +570,31 @@ export default function VibeCoderPage() {
     if (lowerPrompt.includes('dashboard') || lowerPrompt.includes('admin')) {
       config.type = 'dashboard';
       config.features.push('dashboard');
-    }
-    if (lowerPrompt.includes('ecommerce') || lowerPrompt.includes('shop') || lowerPrompt.includes('store')) {
+      setProjectType('dashboard');
+    } else if (lowerPrompt.includes('ecommerce') || lowerPrompt.includes('shop') || lowerPrompt.includes('store')) {
       config.type = 'ecommerce';
       config.features.push('products', 'cart');
-    }
-    if (lowerPrompt.includes('blog')) {
+      setProjectType('ecommerce');
+    } else if (lowerPrompt.includes('blog')) {
       config.type = 'blog';
       config.features.push('blog');
-    }
-    if (lowerPrompt.includes('saas') || lowerPrompt.includes('subscription')) {
+      setProjectType('blog');
+    } else if (lowerPrompt.includes('saas') || lowerPrompt.includes('subscription')) {
       config.type = 'saas';
       config.features.push('dashboard');
-    }
-    if (lowerPrompt.includes('portfolio')) {
+      setProjectType('landing');
+    } else if (lowerPrompt.includes('portfolio')) {
       config.type = 'portfolio';
+      setProjectType('landing');
+    } else {
+      setProjectType('landing');
     }
     
     // Detect features
     if (lowerPrompt.includes('auth') || lowerPrompt.includes('login') || lowerPrompt.includes('signup') || lowerPrompt.includes('user')) {
       config.hasAuth = true;
       config.hasDatabase = true;
+      setProjectType('auth');
     }
     if (lowerPrompt.includes('database') || lowerPrompt.includes('sql') || lowerPrompt.includes('data')) {
       config.hasDatabase = true;
@@ -341,6 +618,9 @@ export default function VibeCoderPage() {
     if (files.length > 0) {
       selectFile(files[0].path);
     }
+    
+    // Switch to preview tab
+    setActiveTab('preview');
     
     setIsBuilding(false);
     
@@ -409,8 +689,10 @@ ${result.sql ? `• SQL schema with ${result.sql.match(/CREATE TABLE/gi)?.length
 **Features:**
 ${result.config.features.map(f => `• ${f}`).join('\n') || '• Landing page'}
 
-The code is ready in the editor. You can:
-1. View and edit files in the file tree
+✨ **The preview is now live!** Check the Preview tab to see your website.
+
+You can:
+1. Edit files in the code editor
 2. Export SQL to run on your backend
 3. Push to GitHub
 4. Connect your database
@@ -456,12 +738,18 @@ What would you like to modify?`,
     }
   };
 
+  const handleRefreshPreview = () => {
+    if (iframeRef.current && previewUrl) {
+      iframeRef.current.src = previewUrl;
+    }
+  };
+
   const getAgentIcon = (agent: string) => {
     const config = AGENT_CONFIGS[agent];
     if (!config) return <Sparkles className="size-3" />;
     
     const iconMap: Record<string, typeof Brain> = {
-      Brain, Layers, Database, Palette, Shield, Globe, Zap, CheckCircle2
+      Brain, Database, Zap, CheckCircle2
     };
     
     const Icon = iconMap[config.icon] || Brain;
@@ -773,13 +1061,13 @@ What would you like to modify?`,
               {/* Tabs */}
               <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as typeof activeTab)}>
                 <TabsList className="h-8">
-                  <TabsTrigger value="code" className="h-7 px-3 text-xs gap-1.5">
-                    <Code2 className="size-3" />
-                    Code
-                  </TabsTrigger>
                   <TabsTrigger value="preview" className="h-7 px-3 text-xs gap-1.5">
                     <Eye className="size-3" />
                     Preview
+                  </TabsTrigger>
+                  <TabsTrigger value="code" className="h-7 px-3 text-xs gap-1.5">
+                    <Code2 className="size-3" />
+                    Code
                   </TabsTrigger>
                   <TabsTrigger value="terminal" className="h-7 px-3 text-xs gap-1.5">
                     <Terminal className="size-3" />
@@ -805,21 +1093,61 @@ What would you like to modify?`,
                       </Button>
                     );
                   })}
+                  <Button size="icon" variant="ghost" className="size-7" onClick={handleRefreshPreview}>
+                    <RefreshCw className="size-4" />
+                  </Button>
+                  {previewUrl && (
+                    <Button size="icon" variant="ghost" className="size-7" onClick={() => window.open(previewUrl, '_blank')}>
+                      <ExternalLink className="size-4" />
+                    </Button>
+                  )}
                 </div>
               )}
 
               {/* Actions */}
-              <Button size="icon" variant="ghost" className="size-7" onClick={handleCopyCode}>
-                {copied ? <Check className="size-4" /> : <Copy className="size-4" />}
-              </Button>
-              <Button size="icon" variant="ghost" className="size-7">
-                <Download className="size-4" />
-              </Button>
+              {activeTab === 'code' && (
+                <>
+                  <Button size="icon" variant="ghost" className="size-7" onClick={handleCopyCode}>
+                    {copied ? <Check className="size-4" /> : <Copy className="size-4" />}
+                  </Button>
+                  <Button size="icon" variant="ghost" className="size-7">
+                    <Download className="size-4" />
+                  </Button>
+                </>
+              )}
             </div>
           </div>
 
           {/* Content area */}
           <div className="flex-1 overflow-hidden">
+            {activeTab === 'preview' && (
+              <div className="h-full flex items-center justify-center p-4 bg-[#f5f5f5] dark:bg-gray-900">
+                <div
+                  className="h-full border rounded-xl overflow-hidden bg-white shadow-2xl transition-all duration-300"
+                  style={{
+                    width: viewportSizes[viewport].width,
+                    maxWidth: '100%',
+                  }}
+                >
+                  {previewUrl ? (
+                    <iframe
+                      ref={iframeRef}
+                      src={previewUrl}
+                      className="w-full h-full border-0"
+                      title="Preview"
+                      sandbox="allow-scripts allow-same-origin"
+                    />
+                  ) : (
+                    <div className="h-full flex flex-col items-center justify-center p-8 text-gray-500">
+                      <Loader2 className="size-8 animate-spin mb-4 text-blue-500" />
+                      <h3 className="font-medium text-lg mb-2">Loading Preview...</h3>
+                      <p className="text-sm">Generating your website preview</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
             {activeTab === 'code' && (
               <div className="h-full">
                 {currentFile ? (
@@ -848,7 +1176,7 @@ What would you like to modify?`,
                       <FileCode className="size-16 text-muted-foreground/30 mx-auto mb-4" />
                       <h3 className="font-medium text-lg mb-2">No file selected</h3>
                       <p className="text-sm text-muted-foreground">
-                        Select a file from the tree or ask AI to generate code
+                        Select a file from the tree to edit
                       </p>
                     </div>
                   </div>
@@ -856,57 +1184,22 @@ What would you like to modify?`,
               </div>
             )}
 
-            {activeTab === 'preview' && (
-              <div className="h-full flex items-center justify-center p-6">
-                <div
-                  className="h-full border rounded-xl overflow-hidden bg-white transition-all duration-300"
-                  style={{
-                    width: viewportSizes[viewport].width,
-                    maxWidth: '100%',
-                  }}
-                >
-                  {currentProject?.files.length ? (
-                    <div className="h-full flex flex-col items-center justify-center bg-gradient-to-br from-cyan-500/10 to-purple-500/10 p-8">
-                      <div className="text-center max-w-md">
-                        <div className="size-20 rounded-2xl bg-gradient-to-br from-cyan-500 to-purple-500 flex items-center justify-center mx-auto mb-6 shadow-lg shadow-cyan-500/20">
-                          <CheckCircle2 className="size-10 text-white" />
-                        </div>
-                        <h3 className="font-semibold text-xl mb-2 text-gray-900">
-                          {currentProject.files.length} Files Generated
-                        </h3>
-                        <p className="text-gray-600 text-sm mb-6">
-                          Your website code is ready. Download or push to GitHub.
-                        </p>
-                        <div className="flex gap-2 justify-center">
-                          <Button size="sm" variant="outline">
-                            <Download className="size-4 mr-2" />
-                            Download
-                          </Button>
-                          <Button size="sm">
-                            <Play className="size-4 mr-2" />
-                            Run Preview
-                          </Button>
-                        </div>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="h-full flex flex-col items-center justify-center p-8 text-gray-500">
-                      <Eye className="size-16 opacity-30 mb-4" />
-                      <h3 className="font-medium text-lg mb-2">No preview available</h3>
-                      <p className="text-sm">Generate code to see the preview</p>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-
             {activeTab === 'terminal' && (
               <div className="h-full bg-gray-900 p-4 font-mono text-sm text-green-400">
                 <div className="mb-2">$ npm run dev</div>
-                <div className="text-gray-500">Ready to run your generated website...</div>
-                <div className="mt-4 text-gray-600">
+                <div className="text-gray-400 mb-4">
+                  <div>VITE v5.4.1  ready in 234 ms</div>
+                  <div className="mt-2">
+                    <span className="text-cyan-400">➜</span>  Local:   <span className="text-blue-400">http://localhost:3000/</span>
+                  </div>
+                  <div>
+                    <span className="text-cyan-400">➜</span>  Network: <span className="text-gray-500">use --host to expose</span>
+                  </div>
+                </div>
+                <div className="text-gray-500 border-t border-gray-700 pt-4 mt-4">
+                  <p>✓ Preview is running above</p>
                   <p>• Connect your backend to run SQL migrations</p>
-                  <p>• Push to GitHub and deploy</p>
+                  <p>• Push to GitHub and deploy to production</p>
                   <p>• Or download the code and run locally</p>
                 </div>
                 <div className="mt-4 flex items-center gap-2">
@@ -973,12 +1266,9 @@ What would you like to modify?`,
                   </div>
                 ) : (
                   <div className="flex flex-col items-center justify-center py-12 px-4 text-center">
-                    <FolderTree className="size-8 text-muted-foreground/50 mb-3" />
+                    <Loader2 className="size-8 text-muted-foreground/50 mb-3 animate-spin" />
                     <p className="text-sm text-muted-foreground">
-                      No files yet
-                    </p>
-                    <p className="text-[10px] text-muted-foreground mt-1">
-                      Ask AI to build your website
+                      Initializing project...
                     </p>
                   </div>
                 )}
