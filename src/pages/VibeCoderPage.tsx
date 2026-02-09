@@ -11,8 +11,8 @@ import { BackendConnect } from '@/components/features/BackendConnect';
 import { SQLExport } from '@/components/features/SQLExport';
 import { AGENT_CONFIGS, PHASE_DESCRIPTIONS } from '@/constants/config';
 import { cn, formatRelativeTime, getLanguageFromPath } from '@/lib/utils';
-import { generateFullWebsite, WebsiteConfig } from '@/lib/website-generator';
-import { generatePreviewHTML, createPreviewBlobURL, revokePreviewBlobURL } from '@/lib/preview-renderer';
+import { generateFullWebsite, detectWebsiteType } from '@/lib/website-generator';
+import { generatePreviewHTML, createPreviewBlobURL, revokePreviewBlobURL, setDirectPreviewHTML } from '@/lib/preview-renderer';
 import { downloadFile, exportProjectAsZip, copyProjectToClipboard } from '@/lib/file-export';
 import {
   Send,
@@ -347,7 +347,6 @@ What would you like me to build?`,
   useEffect(() => {
     const project = getCurrentProject();
     if (!project?.files.length) {
-      // No files - show empty state
       if (previewUrl) {
         revokePreviewBlobURL(previewUrl);
         setPreviewUrl('');
@@ -355,21 +354,18 @@ What would you like me to build?`,
       return;
     }
     
-    // Generate preview HTML from actual file content
-    const previewFiles = project.files.map(f => ({
-      path: f.path,
-      content: f.content,
-      language: f.language,
-    }));
-    
-    const html = generatePreviewHTML(previewFiles, projectType);
+    // Use direct preview HTML if available (from website generator)
+    // This gives pixel-perfect previews without JSX parsing
+    const html = generatePreviewHTML(
+      project.files.map(f => ({ path: f.path, content: f.content, language: f.language })),
+      projectType
+    );
     
     // Cleanup old blob URL
     if (previewUrl) {
       revokePreviewBlobURL(previewUrl);
     }
     
-    // Create new blob URL
     const newUrl = createPreviewBlobURL(html);
     setPreviewUrl(newUrl);
     
@@ -396,54 +392,17 @@ What would you like me to build?`,
   const handleBuildWebsite = async (prompt: string) => {
     setIsBuilding(true);
     
-    const lowerPrompt = prompt.toLowerCase();
-    const config: WebsiteConfig = {
-      name: 'My Website',
-      description: prompt.slice(0, 100),
-      type: 'landing',
-      features: [],
-      hasAuth: false,
-      hasDatabase: false,
-    };
+    // Use smart detection to pick the right template
+    const config = detectWebsiteType(prompt);
+    setProjectType(config.type);
     
-    // Detect website type
-    if (lowerPrompt.includes('dashboard') || lowerPrompt.includes('admin')) {
-      config.type = 'dashboard';
-      config.features.push('dashboard');
-      setProjectType('dashboard');
-    } else if (lowerPrompt.includes('ecommerce') || lowerPrompt.includes('shop') || lowerPrompt.includes('store')) {
-      config.type = 'ecommerce';
-      config.features.push('products', 'cart');
-      setProjectType('ecommerce');
-    } else if (lowerPrompt.includes('blog')) {
-      config.type = 'blog';
-      config.features.push('blog');
-      setProjectType('blog');
-    } else if (lowerPrompt.includes('saas') || lowerPrompt.includes('subscription')) {
-      config.type = 'saas';
-      config.features.push('dashboard');
-      setProjectType('landing');
-    } else if (lowerPrompt.includes('portfolio')) {
-      config.type = 'portfolio';
-      setProjectType('landing');
-    } else {
-      setProjectType('landing');
-    }
+    // Generate the full website with matching template + direct preview HTML
+    const result = generateFullWebsite(config);
     
-    // Detect features
-    if (lowerPrompt.includes('auth') || lowerPrompt.includes('login') || lowerPrompt.includes('signup') || lowerPrompt.includes('user')) {
-      config.hasAuth = true;
-      config.hasDatabase = true;
-      setProjectType('auth');
-    }
-    if (lowerPrompt.includes('database') || lowerPrompt.includes('sql') || lowerPrompt.includes('data')) {
-      config.hasDatabase = true;
-    }
+    // Store the direct preview HTML for perfect rendering
+    setDirectPreviewHTML(result.previewHTML);
     
-    // Generate website
-    const { files, sql } = generateFullWebsite(config);
-    
-    // Clear existing files first for a fresh build
+    // Clear existing files for fresh build
     const existingProject = getCurrentProject();
     if (existingProject?.files) {
       for (const file of existingProject.files) {
@@ -452,30 +411,27 @@ What would you like me to build?`,
     }
     
     // Add files to project with streaming effect
-    for (const file of files) {
+    for (const file of result.files) {
       await new Promise(resolve => setTimeout(resolve, 80));
       addFile(file.path, file.content || '', getLanguageFromPath(file.path));
     }
     
     // Set SQL if generated
-    if (sql) {
-      setCurrentSQL(sql);
+    if (result.sql) {
+      setCurrentSQL(result.sql);
     }
     
-    // Select App.tsx to show main code
-    const appFile = files.find(f => f.path === 'src/App.tsx');
-    if (appFile) {
-      selectFile(appFile.path);
-    } else if (files.length > 0) {
-      selectFile(files[0].path);
-    }
+    // Select the landing page to show main code
+    const landingFile = result.files.find(f => f.path.includes('LandingPage'));
+    const appFile = result.files.find(f => f.path === 'src/App.tsx');
+    selectFile(landingFile?.path || appFile?.path || result.files[0]?.path);
     
     // Switch to preview tab
     setActiveTab('preview');
     
     setIsBuilding(false);
     
-    return { files, sql, config };
+    return { files: result.files, sql: result.sql, config };
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -544,25 +500,21 @@ Building your website now...`,
       // Add completion message
       useChatStore.getState().addMessage({
         role: 'assistant',
-        content: `✅ **Website Build Complete!**
+        content: `✅ **${result.config.name || 'Website'} Build Complete!**
 
 **Generated ${result.files.length} files:**
 ${result.files.slice(0, 8).map(f => `• \`${f.path}\``).join('\n')}
 ${result.files.length > 8 ? `• ...and ${result.files.length - 8} more files` : ''}
 
-**Website Type:** ${result.config.type.charAt(0).toUpperCase() + result.config.type.slice(1)}
-${result.config.hasAuth ? '**Auth:** Login/Signup included' : ''}
-${result.sql ? `**Database:** ${result.sql.match(/CREATE TABLE/gi)?.length || 0} SQL tables generated` : ''}
+**Project:** ${result.config.name} (${result.config.type})
+${result.config.hasAuth ? '**Auth:** Login/Signup included\n' : ''}${result.sql ? `**Database:** SQL schema generated\n` : ''}
+✨ **Preview is now live!** Check the Preview tab.
 
-✨ **Preview is now live!** Check the Preview tab to see your website.
-
-**Next steps:**
-1. View & edit files in the Code tab
-2. Export SQL to your database
-3. Push to GitHub
-4. **Ask me to modify anything!**
-
-What would you like to change?`,
+**I can modify anything:**
+• "Change the color scheme to blue"
+• "Add a testimonials section"
+• "Make the hero section taller"
+• "Update the product names"`,
         agent: 'orchestrator',
       });
       
