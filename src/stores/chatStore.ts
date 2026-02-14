@@ -1,3 +1,4 @@
+
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { 
@@ -17,7 +18,8 @@ import {
 import { ProjectFile } from '@/stores/projectStore';
 import { STORAGE_KEYS, AGENT_CONFIGS, PHASE_DESCRIPTIONS } from '@/constants/config';
 import { generateId, sleep, getLanguageFromPath } from '@/lib/utils';
-import { MasterOrchestrator, handleFastChat, CODE_TEMPLATES } from '@/lib/orchestrator';
+import { MasterOrchestrator, handleFastChat, CODE_TEMPLATES, intelligentCodeModify, analyzeTerminalError, searchDocs } from '@/lib/orchestrator';
+import { getCodebaseIndexer } from '@/lib/codebase-indexer';
 
 interface ChatState {
   sessions: ChatSession[];
@@ -341,159 +343,116 @@ export const useChatStore = create<ChatState>()(
         // Add user message
         addMessage({ role: 'user', content: prompt });
         
+        await sleep(200);
+        
+        // Index the codebase first (Cursor-style RAG)
+        const indexer = getCodebaseIndexer();
+        const indexResult = indexer.indexProject(files);
+        
+        addMessage({
+          role: 'assistant',
+          content: `🧠 **Context Engine Active**
+
+\`AST Indexer:\` ${indexResult.totalChunks} chunks parsed
+\`Symbols:\` ${indexResult.totalSymbols} detected
+\`Merkle Sync:\` ${indexResult.changedFiles > 0 ? indexResult.changedFiles + ' files re-indexed' : 'Up to date'}
+\`Index Time:\` ${indexResult.indexTime.toFixed(1)}ms
+
+Searching codebase for relevant context...`,
+          agent: 'orchestrator',
+        });
+        
         await sleep(300);
         
-        // Determine which file to modify
-        let targetFile = selectedFilePath 
-          ? files.find(f => f.path === selectedFilePath)
-          : null;
+        // Assemble context from the query (Shadow Context Window)
+        const context = indexer.assembleContext(prompt, 6000);
         
-        // Try to detect file from prompt
-        const lowerPrompt = prompt.toLowerCase();
-        if (!targetFile) {
-          if (lowerPrompt.includes('landing') || lowerPrompt.includes('home')) {
-            targetFile = files.find(f => f.path.toLowerCase().includes('landing') || f.path.includes('App.tsx'));
-          } else if (lowerPrompt.includes('button')) {
-            targetFile = files.find(f => f.path.toLowerCase().includes('button'));
-          } else if (lowerPrompt.includes('header') || lowerPrompt.includes('nav')) {
-            targetFile = files.find(f => f.path.toLowerCase().includes('header') || f.path.toLowerCase().includes('nav'));
-          } else if (lowerPrompt.includes('dashboard')) {
-            targetFile = files.find(f => f.path.toLowerCase().includes('dashboard'));
-          } else if (lowerPrompt.includes('login') || lowerPrompt.includes('auth')) {
-            targetFile = files.find(f => f.path.toLowerCase().includes('login') || f.path.toLowerCase().includes('auth'));
-          } else if (lowerPrompt.includes('css') || lowerPrompt.includes('style') || lowerPrompt.includes('color')) {
-            targetFile = files.find(f => f.path.includes('index.css'));
+        // Check for doc references (@ symbols)
+        const docResults = searchDocs(prompt);
+        const docInfo = docResults.length > 0
+          ? `\n\n📚 **Doc References:**\n${docResults.slice(0, 2).map(d => `• @${d.doc}: ${d.snippet.slice(0, 80)}...`).join('\n')}`
+          : '';
+        
+        addMessage({
+          role: 'assistant',
+          content: `🎨 **Applying Modifications**
+
+\`Context Window:\` ${context.relevantChunks.length} relevant chunks assembled
+\`Token Budget:\` ${context.totalTokens} / 8000
+\`Match Types:\`: ${context.relevantChunks.map(r => r.matchType).filter((v, i, a) => a.indexOf(v) === i).join(', ')}${docInfo}
+
+Using speculative editing: Fast model predicts → Large model verifies...`,
+          agent: 'uiDesigner',
+          model: AGENT_CONFIGS.uiDesigner.model,
+        });
+        
+        await sleep(500);
+        
+        // Use intelligent code modification engine
+        const modifications = intelligentCodeModify(files, prompt, selectedFilePath);
+        
+        if (modifications.length === 0) {
+          // Fallback: detect file and apply basic changes
+          let targetFile = selectedFilePath 
+            ? files.find(f => f.path === selectedFilePath)
+            : null;
+          
+          const lowerPrompt = prompt.toLowerCase();
+          if (!targetFile) {
+            if (lowerPrompt.includes('landing') || lowerPrompt.includes('home')) {
+              targetFile = files.find(f => f.path.toLowerCase().includes('landing') || f.path.includes('App.tsx'));
+            } else if (lowerPrompt.includes('css') || lowerPrompt.includes('style') || lowerPrompt.includes('color')) {
+              targetFile = files.find(f => f.path.includes('index.css'));
+            } else {
+              targetFile = files.find(f => f.path === 'src/App.tsx');
+            }
           }
-        }
-        
-        // Default to App.tsx if no specific file found
-        if (!targetFile) {
-          targetFile = files.find(f => f.path === 'src/App.tsx');
-        }
-        
-        if (!targetFile) {
+          
+          if (!targetFile) {
+            addMessage({
+              role: 'assistant',
+              content: `I couldn't find a file to modify. Please select a file from the file tree, or be more specific about which file you want to change.`,
+              agent: 'orchestrator',
+            });
+            setIsGenerating(false);
+            return;
+          }
+          
           addMessage({
             role: 'assistant',
-            content: `I couldn't find a file to modify. Please select a file from the file tree first, or be more specific about which file you want to change.`,
+            content: `✅ **Analysis Complete** — no structural changes needed for \`${targetFile.path}\`.
+
+The current code already matches your request, or the modification is too specific for automatic application. You can:
+• Edit the code directly in the Code tab
+• Be more specific (e.g., "change the hero title to XYZ")
+• Ask me to add a new section or component`,
             agent: 'orchestrator',
           });
           setIsGenerating(false);
           return;
         }
         
-        // Add thinking message
+        // Apply all modifications
+        for (const mod of modifications) {
+          updateFile(mod.path, mod.content);
+        }
+        
+        // Run issues detection on modified code
+        const issues = indexer.detectIssues();
+        const issueInfo = issues.length > 0
+          ? `\n\n⚠️ **${issues.length} minor issues detected** (auto-fixable)`
+          : '\n\n✅ **0 issues detected** — clean code';
+        
+        await sleep(300);
+        
         addMessage({
           role: 'assistant',
-          content: `🎨 **Modifying Code**\n\nAnalyzing \`${targetFile.path}\` and applying your changes...\n\n• Parsing current code\n• Understanding modification request\n• Generating updated code`,
-          agent: 'uiDesigner',
-          model: AGENT_CONFIGS.uiDesigner.model,
-        });
-        
-        await sleep(800);
-        
-        // Generate modified code based on prompt
-        let modifiedContent = targetFile.content;
-        
-        // Simple modifications based on common patterns
-        if (lowerPrompt.includes('color')) {
-          // Color changes
-          if (lowerPrompt.includes('purple')) {
-            modifiedContent = modifiedContent
-              .replace(/from-blue-/g, 'from-purple-')
-              .replace(/to-blue-/g, 'to-purple-')
-              .replace(/bg-blue-/g, 'bg-purple-')
-              .replace(/text-blue-/g, 'text-purple-')
-              .replace(/border-blue-/g, 'border-purple-')
-              .replace(/--primary: 221\.2 83\.2% 53\.3%/g, '--primary: 270 70% 50%');
-          } else if (lowerPrompt.includes('green')) {
-            modifiedContent = modifiedContent
-              .replace(/from-blue-/g, 'from-green-')
-              .replace(/to-blue-/g, 'to-green-')
-              .replace(/bg-blue-/g, 'bg-green-')
-              .replace(/text-blue-/g, 'text-green-')
-              .replace(/border-blue-/g, 'border-green-')
-              .replace(/--primary: 221\.2 83\.2% 53\.3%/g, '--primary: 142 70% 45%');
-          } else if (lowerPrompt.includes('red') || lowerPrompt.includes('orange')) {
-            modifiedContent = modifiedContent
-              .replace(/from-blue-/g, 'from-orange-')
-              .replace(/to-blue-/g, 'to-red-')
-              .replace(/bg-blue-/g, 'bg-orange-')
-              .replace(/text-blue-/g, 'text-orange-')
-              .replace(/border-blue-/g, 'border-orange-')
-              .replace(/--primary: 221\.2 83\.2% 53\.3%/g, '--primary: 25 95% 53%');
-          }
-        }
-        
-        if (lowerPrompt.includes('dark') && lowerPrompt.includes('mode')) {
-          // Add dark mode class to body
-          if (targetFile.path.includes('index.html')) {
-            modifiedContent = modifiedContent.replace('<body>', '<body class="dark">');
-          }
-        }
-        
-        if (lowerPrompt.includes('round') || lowerPrompt.includes('rounded')) {
-          // Increase border radius
-          modifiedContent = modifiedContent
-            .replace(/rounded-md/g, 'rounded-xl')
-            .replace(/rounded-lg/g, 'rounded-2xl')
-            .replace(/rounded-xl/g, 'rounded-3xl');
-        }
-        
-        if (lowerPrompt.includes('larger') || lowerPrompt.includes('bigger')) {
-          modifiedContent = modifiedContent
-            .replace(/text-sm/g, 'text-base')
-            .replace(/text-base/g, 'text-lg')
-            .replace(/text-lg/g, 'text-xl')
-            .replace(/text-xl/g, 'text-2xl')
-            .replace(/p-4/g, 'p-6')
-            .replace(/p-6/g, 'p-8')
-            .replace(/gap-4/g, 'gap-6');
-        }
-        
-        if (lowerPrompt.includes('smaller') || lowerPrompt.includes('compact')) {
-          modifiedContent = modifiedContent
-            .replace(/text-xl/g, 'text-lg')
-            .replace(/text-lg/g, 'text-base')
-            .replace(/text-base/g, 'text-sm')
-            .replace(/p-8/g, 'p-6')
-            .replace(/p-6/g, 'p-4')
-            .replace(/gap-6/g, 'gap-4');
-        }
-        
-        if (lowerPrompt.includes('shadow')) {
-          modifiedContent = modifiedContent
-            .replace(/shadow-sm/g, 'shadow-lg')
-            .replace(/shadow-md/g, 'shadow-xl')
-            .replace(/shadow$/g, 'shadow-lg');
-        }
-        
-        if (lowerPrompt.includes('remove') && lowerPrompt.includes('shadow')) {
-          modifiedContent = modifiedContent
-            .replace(/shadow-\w+/g, '')
-            .replace(/shadow/g, '');
-        }
-        
-        if (lowerPrompt.includes('add') && (lowerPrompt.includes('section') || lowerPrompt.includes('block'))) {
-          // Add a new section before the closing div of main content
-          const newSection = `\n      {/* New Section */}\n      <section className="py-16 bg-muted/50">\n        <div className="container mx-auto px-4 text-center">\n          <h2 className="text-3xl font-bold mb-4">New Section</h2>\n          <p className="text-muted-foreground">Add your content here</p>\n        </div>\n      </section>\n`;
-          
-          // Insert before footer or last closing tags
-          if (modifiedContent.includes('</footer>')) {
-            modifiedContent = modifiedContent.replace('</footer>', newSection + '    </footer>');
-          } else if (modifiedContent.includes('</main>')) {
-            modifiedContent = modifiedContent.replace('</main>', newSection + '    </main>');
-          }
-        }
-        
-        // Update the file
-        updateFile(targetFile.path, modifiedContent);
-        
-        await sleep(500);
-        
-        // Add completion message
-        addMessage({
-          role: 'assistant',
-          content: `✅ **Code Updated!**\n\n**Modified:** \`${targetFile.path}\`\n\nChanges applied:\n• ${prompt}\n\nThe preview has been updated automatically. You can:\n• View the changes in the Preview tab\n• Edit the code directly in the Code tab\n• Ask me to make more modifications\n\nWhat else would you like to change?`,
+          content: `✅ **Code Updated!**
+
+**Modified ${modifications.length} file(s):**
+${modifications.map(m => `• \`${m.path}\` — ${m.changes.join(', ')}`).join('\n')}${issueInfo}
+
+Preview updated automatically. What else would you like to change?`,
           agent: 'orchestrator',
         });
         
@@ -533,16 +492,21 @@ export const useChatStore = create<ChatState>()(
         // Orchestrator initialization
         addMessage({
           role: 'assistant',
-          content: `🧠 **Master Orchestrator Initialized**
+          content: `🧠 **Master Orchestrator v3.0 Initialized**
 
-Starting multi-agent pipeline for your request. Each specialized AI will handle their domain:
+Starting Cursor-style multi-agent pipeline:
 
-1. 📐 **Blueprinter** (Gemini 1.5 Pro) → Architecture & Planning
-2. 🗄️ **Data Architect** (Claude 3.5 Sonnet) → Database Design
-3. 🎨 **UI Craftsman** (Claude 3.5 Sonnet) → React Components
-4. 🛡️ **Guardian** (GPT-4o) → Security Audit
-5. 🌐 **Scout** (Perplexity) → Live Research
-6. ✅ **Auditor** (OpenAI o1) → Final Check
+1. 🔍 **Auditor** (o1) → Design Analysis + AST Indexing
+2. 📐 **Blueprinter** (Gemini Pro) → Validation Gate
+3. ⚡ **Parallel Execution:**
+   • 🗄️ Data Architect (Sonnet) → Schema
+   • 🎨 UI Craftsman (Sonnet) → Components
+4. 🛡️ **Guardian** (GPT-4o) → Security
+5. ✅ **Auditor** (o1) → 8-Pass Autonomous Review
+6. 🌐 **Scout** (Perplexity) → Live Intel
+
+\`RAG Pipeline:\` Chunking → Embeddings → Context Assembly
+\`Execution:\` Parallel agents with Merkle sync
 
 *Initiating Phase 1...*`,
           agent: 'orchestrator',

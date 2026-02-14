@@ -134,36 +134,36 @@ export const AGENT_CONFIGS: Record<string, AgentConfig> = {
   },
 };
 
-// Agent execution order for full pipeline (NEW v2.0 WORKFLOW)
-// 1. Auditor first (design analysis)
-// 2. Blueprinter (validation)
-// 3. Data Architect (schema)
-// 4. UI Craftsman (implementation)
-// 5. Guardian (security)
-// 6. Auditor again (8-pass review)
+// Agent execution order for full pipeline (v3.0 CURSOR-STYLE WORKFLOW)
+// 1. Auditor first (design analysis + AST indexing)
+// 2. Blueprinter (validation gate)
+// 3. Data Architect + UI Craftsman (PARALLEL execution)
+// 4. Guardian (security scan)
+// 5. Auditor again (8-pass review with auto-fix)
+// 6. Scout (version check)
 export const AGENT_PIPELINE_ORDER: (keyof typeof AGENT_CONFIGS)[] = [
-  'finalCheck',    // Phase 1: Design Analysis
-  'blueprinter',   // Phase 2: Validation
-  'dataLayer',     // Phase 3: Schema Generation
-  'uiDesigner',    // Phase 4: UI Implementation
-  'security',      // Phase 5: Security
-  'finalCheck',    // Phase 6: Multi-Pass Audit
-  'liveIntel',     // Phase 7: Version Check
+  'finalCheck',    // Phase 1: Design Analysis + AST Index
+  'blueprinter',   // Phase 2: Validation Gate
+  'dataLayer',     // Phase 3a: Schema Generation (parallel)
+  'uiDesigner',    // Phase 3b: UI Implementation (parallel)
+  'security',      // Phase 4: Security Scan
+  'finalCheck',    // Phase 5: 8-Pass Autonomous Audit
+  'liveIntel',     // Phase 6: Version Check
 ];
 
-// Phase descriptions for UI (NEW v2.0 WORKFLOW)
-export const PHASE_DESCRIPTIONS = {
+// Phase descriptions for UI (v3.0 CURSOR-STYLE)
+export const PHASE_DESCRIPTIONS: Record<string, string> = {
   idle: 'Waiting for input...',
-  designAnalysis: 'Auditor analyzing request for design specs...',
-  blueprinting: 'Blueprinter validating design specifications...',
-  dataLayer: 'Data Architect generating database schema...',
-  uiDesign: 'UI Craftsman building components from design...',
-  security: 'Guardian implementing security measures...',
-  liveIntel: 'Scout checking library versions...',
+  designAnalysis: 'Auditor: AST indexing + design analysis...',
+  blueprinting: 'Blueprinter: Validating design specs...',
+  dataLayer: 'Parallel: Data Architect + UI Craftsman...',
+  uiDesign: 'Parallel: Building components...',
+  security: 'Guardian: Security scan...',
+  liveIntel: 'Scout: Checking versions...',
   fastChat: 'Processing quick response...',
-  finalCheck: 'Auditor running 8-pass autonomous code review...',
-  errorResolution: 'Fixing issues and re-auditing...',
-  complete: 'All tasks completed successfully!',
+  finalCheck: 'Auditor: 8-pass autonomous review...',
+  errorResolution: 'Auto-fixing issues...',
+  complete: 'All tasks completed!',
 };
 
 export const NAV_ITEMS = [
