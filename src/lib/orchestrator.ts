@@ -1699,6 +1699,8 @@ export class MasterOrchestrator {
       ? `\n\n**📚 Doc References:**\n${docResults.slice(0, 2).map(d => `• @${d.doc}: ${d.snippet.slice(0, 80)}...`).join('\n')}`
       : '';
     
+    const featuresText = this.designSpec.copywriting.features.map(f => '• ' + f.title + ': ' + f.description).join('\n');
+    
     this.onUpdate('finalCheck', `📋 **Design Analysis Complete**
 
 **Project:** ${this.designSpec.projectName}
@@ -1713,7 +1715,7 @@ export class MasterOrchestrator {
 • Hero: ${this.designSpec.uiDesign.heroStyle} | Cards: ${this.designSpec.uiDesign.cardStyle}
 
 **Features:**
-${this.designSpec.copywriting.features.map(f => \`• ${f.title}: ${f.description}\`).join('\n')}${docContext}`, 'finalCheck');
+${featuresText}${docContext}`, 'finalCheck');
     
     // ========== PHASE 2: BLUEPRINTER VALIDATION ==========
     this.context.currentPhase = 'blueprinting';
